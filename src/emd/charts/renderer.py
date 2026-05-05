@@ -40,7 +40,9 @@ class ChartRenderer:
     def distribution_charts(
         self, df: pd.DataFrame, result: DistributionResult
     ) -> dict[str, Path]:
+        # Keys use original column name so report generator can look up without re-slugging
         paths: dict[str, Path] = {}
+        seen: dict[str, int] = {}
         with plt.style.context(self.style):
             for col_stats in result.numeric:
                 col = col_stats.name
@@ -51,20 +53,17 @@ class ChartRenderer:
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
                 fig.suptitle(f"Distribution — {col}", fontsize=13)
 
-                # Histogram + KDE
                 sns.histplot(series, ax=ax1, kde=True, bins="auto", color="#4C72B0")
                 ax1.set_title("Histogram + KDE")
                 ax1.set_xlabel(col)
 
-                # Box plot
                 ax2.boxplot(series, vert=True, patch_artist=True,
                             boxprops={"facecolor": "#4C72B0", "alpha": 0.6})
                 ax2.set_title("Box Plot")
                 ax2.set_ylabel(col)
                 ax2.set_xticks([])
 
-                slug = _slug(col)
-                paths[f"dist_{slug}"] = self._save(f"distribution_{slug}")
+                paths[f"dist:{col}"] = self._save(f"distribution_{_slug(col, seen)}")
 
             for col_stats in result.categorical:
                 if not col_stats.top_values:
@@ -76,8 +75,7 @@ class ChartRenderer:
                 ax.barh(labels[::-1], counts[::-1], color="#DD8452")
                 ax.set_title(f"Top Values — {col_stats.name}")
                 ax.set_xlabel("Count")
-                slug = _slug(col_stats.name)
-                paths[f"cat_{slug}"] = self._save(f"categorical_{slug}")
+                paths[f"cat:{col_stats.name}"] = self._save(f"categorical_{_slug(col_stats.name, seen)}")
 
         return paths
 
@@ -101,7 +99,6 @@ class ChartRenderer:
                 ax.set_title(f"{label.capitalize()} Correlation Matrix")
                 paths[f"corr_{label}"] = self._save(f"correlation_{label}")
 
-            # Top-10 strongest pairs bar
             if result.strong_pairs:
                 pairs = result.strong_pairs[:10]
                 labels_p = [f"{a}\n{b}" for a, b, _, _ in pairs]
@@ -122,7 +119,6 @@ class ChartRenderer:
     def missing_charts(self, result: MissingResult) -> dict[str, Path]:
         paths: dict[str, Path] = {}
         with plt.style.context(self.style):
-            # Per-column bar chart (only columns with any missing)
             cols_with_missing = [c for c in result.columns if c.missing_count > 0]
             if cols_with_missing:
                 sorted_cols = sorted(cols_with_missing, key=lambda c: -c.missing_pct)
@@ -146,6 +142,7 @@ class ChartRenderer:
     # -------------------------------------------------------------------------
     def outlier_charts(self, df: pd.DataFrame, result: OutlierResult) -> dict[str, Path]:
         paths: dict[str, Path] = {}
+        seen: dict[str, int] = {}
         with plt.style.context(self.style):
             for col_out in result.columns:
                 col = col_out.name
@@ -171,10 +168,8 @@ class ChartRenderer:
                 ax.set_xlabel("Index")
                 ax.set_ylabel(col)
                 ax.legend(fontsize=8)
-                slug = _slug(col)
-                paths[f"outlier_{slug}"] = self._save(f"outlier_{slug}")
+                paths[f"outlier:{col}"] = self._save(f"outlier_{_slug(col, seen)}")
 
-            # Method comparison summary bar
             if result.columns:
                 names = [c.name[:20] for c in result.columns]
                 iqr_counts = [c.iqr_count for c in result.columns]
@@ -197,5 +192,9 @@ class ChartRenderer:
         return paths
 
 
-def _slug(name: str) -> str:
-    return "".join(c if c.isalnum() else "_" for c in name).strip("_")[:40]
+def _slug(name: str, seen: dict[str, int]) -> str:
+    """Collision-safe filename slug. Pass the same `seen` dict within one render call."""
+    base = "".join(c if c.isalnum() else "_" for c in name).strip("_")[:40] or "col"
+    count = seen.get(base, 0)
+    seen[base] = count + 1
+    return base if count == 0 else f"{base}_{count}"

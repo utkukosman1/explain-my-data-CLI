@@ -134,11 +134,9 @@ class MarkdownReportGenerator:
             lines.append("")
 
             for s in result.numeric:
-                slug = _slug(s.name)
                 lines += [f"#### {s.name}", ""]
-                chart_key = f"dist_{slug}"
-                if chart_key in chart_paths:
-                    rel = _rel_path(chart_paths[chart_key])
+                if f"dist:{s.name}" in chart_paths:
+                    rel = _rel_path(chart_paths[f"dist:{s.name}"])
                     lines += [f"![Distribution of {s.name}]({rel})", ""]
                 lines += [
                     f"- **Mean:** {_fmt(s.mean)}  |  **Std:** {_fmt(s.std)}  |  **CV:** {_fmt(s.cv) if s.cv else 'N/A'}",
@@ -163,10 +161,8 @@ class MarkdownReportGenerator:
             lines.append("")
 
             for s in result.categorical:
-                slug = _slug(s.name)
-                chart_key = f"cat_{slug}"
-                if chart_key in chart_paths:
-                    rel = _rel_path(chart_paths[chart_key])
+                if f"cat:{s.name}" in chart_paths:
+                    rel = _rel_path(chart_paths[f"cat:{s.name}"])
                     lines += [f"#### {s.name}", "", f"![Top values — {s.name}]({rel})", ""]
         else:
             lines += ["> No categorical columns found.", ""]
@@ -298,10 +294,8 @@ class MarkdownReportGenerator:
             lines += [f"![Outlier method comparison]({rel})", ""]
 
         for c in result.columns:
-            slug = _slug(c.name)
-            key = f"outlier_{slug}"
-            if key in chart_paths:
-                rel = _rel_path(chart_paths[key])
+            if f"outlier:{c.name}" in chart_paths:
+                rel = _rel_path(chart_paths[f"outlier:{c.name}"])
                 lines += [f"#### {c.name}", "", f"![Outliers — {c.name}]({rel})", ""]
 
         lines += ["---", ""]
@@ -384,9 +378,6 @@ def _fmt(val: float | None, sig: int = 4) -> str:
         return f"{val:.{sig}g}"
     return f"{val:.{sig}g}"
 
-
-def _slug(name: str) -> str:
-    return "".join(c if c.isalnum() else "_" for c in name).strip("_")[:40]
 
 
 def _rel_path(p: Path) -> str:

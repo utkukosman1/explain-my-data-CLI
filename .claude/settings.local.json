@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/c/Users/utkut/anaconda3/python.exe\" -m pytest tests/ --no-cov -v)",
+      "Bash(emd analyze *)"
+    ]
+  }
+}

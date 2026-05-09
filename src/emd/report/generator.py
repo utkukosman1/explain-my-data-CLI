@@ -9,8 +9,10 @@ import pandas as pd
 from emd import __version__
 from emd.analysis.correlation import CorrelationResult
 from emd.analysis.distribution import DistributionResult
+from emd.analysis.drift import DriftResult
 from emd.analysis.missing import MissingResult
 from emd.analysis.outlier import OutlierResult
+from emd.analysis.target import TargetResult
 from emd.quality.checker import QualityReport
 
 
@@ -26,10 +28,27 @@ class MarkdownReportGenerator:
         chart_paths: dict[str, Path],
         output_dir: Path,
         source_name: str,
+        target_result: TargetResult | None = None,
     ) -> Path:
         lines: list[str] = []
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         rows, cols = df.shape
+
+        toc = [
+            "1. [Data Quality Summary](#1-data-quality-summary)",
+            "2. [Dataset Overview](#2-dataset-overview)",
+            "3. [Distribution Analysis](#3-distribution-analysis)",
+        ]
+        section_num = 4
+        if target_result is not None:
+            toc.append(f"{section_num}. [Key Insights — Target: {target_result.target_col}](#key-insights)")
+            section_num += 1
+        toc += [
+            f"{section_num}. [Correlation Analysis](#correlation-analysis)",
+            f"{section_num+1}. [Missing Value Analysis](#missing-value-analysis)",
+            f"{section_num+2}. [Outlier Detection](#outlier-detection)",
+            f"{section_num+3}. [Appendix](#appendix)",
+        ]
 
         lines += [
             f"# EDA Report — {source_name}",
@@ -39,13 +58,7 @@ class MarkdownReportGenerator:
             "---",
             "",
             "## Table of Contents",
-            "1. [Data Quality Summary](#1-data-quality-summary)",
-            "2. [Dataset Overview](#2-dataset-overview)",
-            "3. [Distribution Analysis](#3-distribution-analysis)",
-            "4. [Correlation Analysis](#4-correlation-analysis)",
-            "5. [Missing Value Analysis](#5-missing-value-analysis)",
-            "6. [Outlier Detection](#6-outlier-detection)",
-            "7. [Appendix](#7-appendix)",
+            *toc,
             "",
             "---",
             "",
@@ -54,12 +67,94 @@ class MarkdownReportGenerator:
         lines += self._quality_section(quality_report)
         lines += self._overview_section(df)
         lines += self._distribution_section(df, dist_result, chart_paths)
+        if target_result is not None:
+            lines += self._target_section(target_result, chart_paths)
         lines += self._correlation_section(corr_result, chart_paths)
         lines += self._missing_section(missing_result, chart_paths)
         lines += self._outlier_section(outlier_result, chart_paths)
         lines += self._appendix_section(dist_result)
 
         report_path = output_dir / "report.md"
+        report_path.write_text("\n".join(lines), encoding="utf-8")
+        return report_path
+
+    def generate_drift_report(
+        self,
+        result: DriftResult,
+        chart_paths: dict[str, Path],
+        output_dir: Path,
+        ref_name: str,
+        cur_name: str,
+    ) -> Path:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines: list[str] = []
+
+        drift_banner = (
+            f"> **DATA DRIFT DETECTED** — {len(result.drifted_columns)} of "
+            f"{len(result.columns)} columns show significant drift"
+            if result.overall_drift
+            else "> No significant drift detected"
+        )
+
+        lines += [
+            f"# Data Drift Report — {ref_name} vs {cur_name}",
+            "",
+            f"**Generated:** {now}  |  **emd version:** {__version__}",
+            "",
+            drift_banner,
+            "",
+            "---",
+            "",
+            "## Summary",
+            "",
+            f"| | Reference | Current |",
+            f"|:--|----------:|--------:|",
+            f"| Rows | {result.reference_shape[0]:,} | {result.current_shape[0]:,} |",
+            f"| Columns | {result.reference_shape[1]} | {result.current_shape[1]} |",
+            f"| Drifted columns | — | {len(result.drifted_columns)} ({result.drift_fraction:.1%}) |",
+            "",
+        ]
+
+        if result.missing_in_current:
+            lines += [
+                f"**Columns missing in current:** {', '.join(result.missing_in_current)}",
+                "",
+            ]
+        if result.new_in_current:
+            lines += [
+                f"**New columns in current:** {', '.join(result.new_in_current)}",
+                "",
+            ]
+
+        # Main drift table
+        lines += [
+            "## Column-Level Drift",
+            "",
+            "| Column | Type | PSI | KS p-value | Mean Shift % | Chi2 p-value | Severity |",
+            "|:-------|:-----|----:|-----------:|-------------:|-------------:|:---------|",
+        ]
+        for c in sorted(result.columns, key=lambda x: -(x.psi or 0)):
+            psi = _fmt(c.psi) if c.psi is not None else "—"
+            ks_p = _fmt(c.ks_pvalue) if c.ks_pvalue is not None else "—"
+            shift = f"{c.mean_shift_pct:.1f}%" if c.mean_shift_pct is not None else "—"
+            chi2_p = _fmt(c.chi2_pvalue) if c.chi2_pvalue is not None else "—"
+            sev_marker = " **HIGH**" if c.drift_severity == "high" else (" moderate" if c.drift_severity == "moderate" else "none")
+            lines.append(f"| {c.name} | {c.col_type} | {psi} | {ks_p} | {shift} | {chi2_p} |{sev_marker} |")
+        lines.append("")
+
+        if "drift_summary" in chart_paths:
+            rel = _rel_path(chart_paths["drift_summary"])
+            lines += [f"![PSI Summary]({rel})", ""]
+
+        if result.drifted_columns:
+            lines += ["## Drifted Columns", ""]
+            for col in result.drifted_columns:
+                key = f"drift:{col}"
+                if key in chart_paths:
+                    rel = _rel_path(chart_paths[key])
+                    lines += [f"### {col}", "", f"![Drift — {col}]({rel})", ""]
+
+        report_path = output_dir / "drift_report.md"
         report_path.write_text("\n".join(lines), encoding="utf-8")
         return report_path
 
@@ -108,6 +203,39 @@ class MarkdownReportGenerator:
         lines += ["", "---", ""]
         return lines
 
+    def _target_section(
+        self, result: TargetResult, chart_paths: dict[str, Path]
+    ) -> list[str]:
+        lines = [
+            f"## Key Insights — Target: {result.target_col}",
+            "",
+            f"**Target type:** {result.target_type}",
+            "",
+            "### Top 5 Features by Correlation with Target",
+            "",
+            "| Rank | Feature | Score | Method | Direction |",
+            "|-----:|:--------|------:|:-------|:----------|",
+        ]
+        for i, f in enumerate(result.top_features, 1):
+            lines.append(f"| {i} | {f.feature} | {f.score:.4f} | {f.method} | {f.direction} |")
+        lines.append("")
+
+        chart_prefix = "target_hist" if result.target_type == "categorical" else "target_scatter"
+        for f in result.top_features:
+            key = f"{chart_prefix}:{f.feature}"
+            if key in chart_paths:
+                rel = _rel_path(chart_paths[key])
+                lines += [f"#### {f.feature}", "", f"![{f.feature} vs {result.target_col}]({rel})", ""]
+
+        if result.warnings:
+            lines += ["### Assumption Notes", ""]
+            for w in result.warnings:
+                lines.append(f"> **Note:** {w}")
+            lines.append("")
+
+        lines += ["---", ""]
+        return lines
+
     def _distribution_section(
         self, df: pd.DataFrame, result: DistributionResult, chart_paths: dict[str, Path]
     ) -> list[str]:
@@ -144,6 +272,10 @@ class MarkdownReportGenerator:
                     f"- **Normality test ({s.normality_test}):** p = {_fmt(s.normality_pvalue) if s.normality_pvalue is not None else 'N/A'}",
                     "",
                 ]
+                for note in s.assumptions:
+                    lines.append(f"> **Note:** {note}")
+                if s.assumptions:
+                    lines.append("")
         else:
             lines += ["> No numeric columns found.", ""]
 
@@ -161,9 +293,15 @@ class MarkdownReportGenerator:
             lines.append("")
 
             for s in result.categorical:
+                if f"cat:{s.name}" in chart_paths or s.assumptions:
+                    lines += [f"#### {s.name}", ""]
                 if f"cat:{s.name}" in chart_paths:
                     rel = _rel_path(chart_paths[f"cat:{s.name}"])
-                    lines += [f"#### {s.name}", "", f"![Top values — {s.name}]({rel})", ""]
+                    lines += [f"![Top values — {s.name}]({rel})", ""]
+                for note in s.assumptions:
+                    lines.append(f"> **Note:** {note}")
+                if s.assumptions:
+                    lines.append("")
         else:
             lines += ["> No categorical columns found.", ""]
 
@@ -206,8 +344,14 @@ class MarkdownReportGenerator:
                 "|:-------|----:|",
             ]
             for col, v in sorted(result.vif.items(), key=lambda x: -x[1]):
-                flag = " ⚠️" if v > 10 else ""
+                flag = " ⚠" if v > 10 else ""
                 lines.append(f"| {col} | {v:.2f}{flag} |")
+            lines.append("")
+
+        if result.warnings:
+            lines += ["### Assumption Notes", ""]
+            for w in result.warnings:
+                lines.append(f"> **Note:** {w}")
             lines.append("")
 
         lines += ["---", ""]
@@ -294,9 +438,17 @@ class MarkdownReportGenerator:
             lines += [f"![Outlier method comparison]({rel})", ""]
 
         for c in result.columns:
-            if f"outlier:{c.name}" in chart_paths:
+            has_chart = f"outlier:{c.name}" in chart_paths
+            has_notes = bool(c.assumptions)
+            if has_chart or has_notes:
+                lines += [f"#### {c.name}", ""]
+            if has_chart:
                 rel = _rel_path(chart_paths[f"outlier:{c.name}"])
-                lines += [f"#### {c.name}", "", f"![Outliers — {c.name}]({rel})", ""]
+                lines += [f"![Outliers — {c.name}]({rel})", ""]
+            for note in c.assumptions:
+                lines.append(f"> **Note:** {note}")
+            if has_notes:
+                lines.append("")
 
         lines += ["---", ""]
         return lines

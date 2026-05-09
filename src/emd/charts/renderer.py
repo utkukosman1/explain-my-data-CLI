@@ -10,8 +10,10 @@ import seaborn as sns
 
 from emd.analysis.correlation import CorrelationResult
 from emd.analysis.distribution import DistributionResult
+from emd.analysis.drift import DriftResult
 from emd.analysis.missing import MissingResult
 from emd.analysis.outlier import OutlierResult
+from emd.analysis.target import TargetResult
 
 matplotlib.use("Agg")  # non-interactive backend
 
@@ -188,6 +190,148 @@ class ChartRenderer:
                 ax.set_title("Outlier Counts per Column — Method Comparison")
                 ax.legend()
                 paths["outlier_comparison"] = self._save("outlier_comparison")
+
+        return paths
+
+
+    # -------------------------------------------------------------------------
+    # Target variable charts
+    # -------------------------------------------------------------------------
+    def target_charts(
+        self, df: pd.DataFrame, result: TargetResult, top_n: int = 5
+    ) -> dict[str, Path]:
+        paths: dict[str, Path] = {}
+        seen: dict[str, int] = {}
+        target_col = result.target_col
+        if target_col not in df.columns:
+            return paths
+
+        features = [f.feature for f in result.top_features[:top_n] if f.feature in df.columns]
+        if not features:
+            return paths
+
+        with plt.style.context(self.style):
+            if result.target_type == "categorical":
+                target_series = df[target_col].astype(str)
+                n_classes = target_series.nunique()
+                palette = sns.color_palette("tab10", n_classes)
+
+                for feat in features:
+                    if not pd.api.types.is_numeric_dtype(df[feat]):
+                        continue
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+                    fig.suptitle(f"{feat} by {target_col}", fontsize=13)
+
+                    # Hue histogram
+                    sns.histplot(data=df, x=feat, hue=target_col, ax=ax1,
+                                 kde=True, bins="auto", palette=palette, alpha=0.5)
+                    ax1.set_title("Distribution by Target")
+
+                    # Box plot per class
+                    groups = [df[feat][df[target_col].astype(str) == cls].dropna()
+                              for cls in target_series.unique()]
+                    labels = [str(cls) for cls in target_series.unique()]
+                    ax2.boxplot(groups, labels=labels, patch_artist=True)
+                    ax2.set_title("Box Plot by Target Class")
+                    ax2.set_xlabel(target_col)
+                    plt.xticks(rotation=30)
+
+                    slug = _slug(feat, seen)
+                    paths[f"target_hist:{feat}"] = self._save(f"target_hist_{slug}")
+
+            else:
+                # Numeric target — scatter plot per feature
+                for feat in features:
+                    if not pd.api.types.is_numeric_dtype(df[feat]):
+                        continue
+                    combined = df[[feat, target_col]].dropna()
+                    if len(combined) < 5:
+                        continue
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    sc = ax.scatter(combined[feat], combined[target_col],
+                                   c=combined[target_col], cmap="viridis", alpha=0.5, s=15)
+                    plt.colorbar(sc, ax=ax, label=target_col)
+                    ax.set_xlabel(feat)
+                    ax.set_ylabel(target_col)
+                    ax.set_title(f"{feat} vs {target_col}")
+
+                    slug = _slug(feat, seen)
+                    paths[f"target_scatter:{feat}"] = self._save(f"target_scatter_{slug}")
+
+        return paths
+
+    # -------------------------------------------------------------------------
+    # Drift comparison charts
+    # -------------------------------------------------------------------------
+    def drift_charts(
+        self, df_ref: pd.DataFrame, df_cur: pd.DataFrame, result: DriftResult
+    ) -> dict[str, Path]:
+        paths: dict[str, Path] = {}
+        seen: dict[str, int] = {}
+
+        with plt.style.context(self.style):
+            # Per-column overlay histograms (only drifted columns)
+            for col_drift in result.columns:
+                if not col_drift.drift_detected:
+                    continue
+                col = col_drift.name
+                if col not in df_ref.columns or col not in df_cur.columns:
+                    continue
+
+                if col_drift.col_type == "numeric":
+                    ref_vals = df_ref[col].dropna()
+                    cur_vals = df_cur[col].dropna()
+                    if len(ref_vals) < 2 or len(cur_vals) < 2:
+                        continue
+
+                    fig, ax = plt.subplots(figsize=(8, 4))
+                    ax.hist(ref_vals, bins=30, alpha=0.5, color="#4C72B0", label="Reference", density=True)
+                    ax.hist(cur_vals, bins=30, alpha=0.5, color="#DD8452", label="Current", density=True)
+                    ax.set_title(f"Drift — {col} (PSI={col_drift.psi:.3f})")
+                    ax.set_xlabel(col)
+                    ax.set_ylabel("Density")
+                    ax.legend()
+                    slug = _slug(col, seen)
+                    paths[f"drift:{col}"] = self._save(f"drift_{slug}")
+
+                else:
+                    ref_vals = df_ref[col].dropna().astype(str)
+                    cur_vals = df_cur[col].dropna().astype(str)
+                    all_cats = sorted(set(ref_vals.unique()) | set(cur_vals.unique()))[:15]
+                    ref_pct = ref_vals.value_counts(normalize=True).reindex(all_cats, fill_value=0)
+                    cur_pct = cur_vals.value_counts(normalize=True).reindex(all_cats, fill_value=0)
+
+                    x = np.arange(len(all_cats))
+                    w = 0.35
+                    fig, ax = plt.subplots(figsize=(max(8, len(all_cats) * 0.7), 4))
+                    ax.bar(x - w / 2, ref_pct.values, w, label="Reference", color="#4C72B0", alpha=0.8)
+                    ax.bar(x + w / 2, cur_pct.values, w, label="Current", color="#DD8452", alpha=0.8)
+                    ax.set_xticks(x)
+                    ax.set_xticklabels(all_cats, rotation=45, ha="right")
+                    ax.set_title(f"Drift — {col} (categorical)")
+                    ax.set_ylabel("Proportion")
+                    ax.legend()
+                    slug = _slug(col, seen)
+                    paths[f"drift:{col}"] = self._save(f"drift_{slug}")
+
+            # PSI summary bar chart (numeric columns only)
+            numeric_drifts = [c for c in result.columns if c.col_type == "numeric" and c.psi is not None]
+            if numeric_drifts:
+                names = [c.name[:25] for c in numeric_drifts]
+                psi_vals = [c.psi for c in numeric_drifts]
+                colors = ["#DD4949" if c.drift_detected else "#55A868" for c in numeric_drifts]
+
+                fig, ax = plt.subplots(figsize=(max(8, len(names) * 0.8), 5))
+                ax.bar(names, psi_vals, color=colors)
+                ax.axhline(result.psi_threshold, color="red", linestyle="--",
+                           linewidth=1.2, label=f"Threshold ({result.psi_threshold})")
+                ax.axhline(0.1, color="orange", linestyle=":", linewidth=1.0, label="Moderate (0.1)")
+                ax.set_ylabel("PSI")
+                ax.set_title("Population Stability Index per Column")
+                ax.set_xticks(range(len(names)))
+                ax.set_xticklabels(names, rotation=45, ha="right")
+                ax.legend()
+                paths["drift_summary"] = self._save("drift_psi_summary")
 
         return paths
 

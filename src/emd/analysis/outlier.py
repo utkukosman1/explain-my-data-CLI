@@ -21,6 +21,7 @@ class ColumnOutliers:
     iforest_count: int | None
     iforest_pct: float | None
     sample_outlier_indices: list[int] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -105,20 +106,86 @@ class OutlierAnalyzer:
             except ImportError:
                 pass
 
-        # Sample indices from original series for the report
         outlier_indices = list(clean.index[iqr_mask][:20])
+
+        iqr_count = int(iqr_mask.sum())
+        zscore_count = int(zscore_mask.sum())
+        mzscore_count = int(mzscore_mask.sum())
+
+        col_skew = float(stats.skew(arr)) if n >= 3 else 0.0
+        assumptions = _check_outlier_assumptions(
+            n=n,
+            col_skew=col_skew,
+            iqr_count=iqr_count,
+            zscore_count=zscore_count,
+            mzscore_count=mzscore_count,
+            mad=float(mad),
+        )
 
         return ColumnOutliers(
             name=str(s.name),
-            iqr_count=int(iqr_mask.sum()),
+            iqr_count=iqr_count,
             iqr_pct=float(iqr_mask.sum() / n),
             iqr_extreme_count=int(iqr_extreme_mask.sum()),
             iqr_extreme_pct=float(iqr_extreme_mask.sum() / n),
-            zscore_count=int(zscore_mask.sum()),
+            zscore_count=zscore_count,
             zscore_pct=float(zscore_mask.sum() / n),
-            mzscore_count=int(mzscore_mask.sum()),
+            mzscore_count=mzscore_count,
             mzscore_pct=float(mzscore_mask.sum() / n),
             iforest_count=iforest_count,
             iforest_pct=iforest_pct,
             sample_outlier_indices=outlier_indices,
+            assumptions=assumptions,
         )
+
+
+def _check_outlier_assumptions(
+    n: int,
+    col_skew: float,
+    iqr_count: int,
+    zscore_count: int,
+    mzscore_count: int,
+    mad: float,
+) -> list[str]:
+    notes: list[str] = []
+
+    # Z-score unreliable on non-normal data
+    if abs(col_skew) > 1.5 and n >= 20:
+        direction = "right" if col_skew > 0 else "left"
+        notes.append(
+            f"Z-score assumes normality — this column is {direction}-skewed "
+            f"(skew = {col_skew:.2f}). Z-score may inflate the outlier count. "
+            f"Modified Z-score (MAD-based) is the more reliable estimate here."
+        )
+
+    # Large disagreement between Z-score and Modified Z-score
+    if n >= 20 and mzscore_count > 0 and zscore_count > mzscore_count * 3:
+        notes.append(
+            f"Z-score ({zscore_count}) and Modified Z-score ({mzscore_count}) disagree substantially. "
+            f"This typically indicates a skewed or heavy-tailed distribution. "
+            f"Prefer Modified Z-score for non-symmetric data."
+        )
+    elif n >= 20 and zscore_count == 0 and mzscore_count > 0:
+        notes.append(
+            f"Modified Z-score flags {mzscore_count} outlier(s) that Z-score misses. "
+            f"This can occur when the distribution has a heavy tail on one side. "
+            f"Modified Z-score is more sensitive to asymmetric outliers."
+        )
+
+    # IQR on heavily skewed data
+    if abs(col_skew) > 2.0 and iqr_count > 0:
+        notes.append(
+            f"IQR fences may produce false positives for heavily skewed data "
+            f"(skew = {col_skew:.2f}). Some flagged values may be legitimate "
+            f"tail observations rather than true anomalies."
+        )
+
+    # MAD = 0 (constant majority)
+    if mad == 0.0:
+        notes.append(
+            "MAD = 0: more than 50% of values are identical. "
+            "Modified Z-score is undefined and returns no outliers. "
+            "Consider inspecting the value distribution directly."
+        )
+
+    return notes

@@ -27,3 +27,5 @@ class ReportConfig:
     no_quality_gate: bool = False
     max_pairplot_cols: int = 8
     top_n_values: int = 10
+    target: str | None = None
+    drift_threshold: float = 0.2

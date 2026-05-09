@@ -47,6 +47,7 @@ def analyze(
     output_json: Annotated[bool, typer.Option("--output-json")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q")] = False,
     no_quality_gate: Annotated[bool, typer.Option("--no-quality-gate")] = False,
+    target: Annotated[Optional[str], typer.Option("--target", help="Target column for Key Insights section")] = None,
 ) -> None:
     """Run full EDA analysis and generate a Markdown report."""
     from emd.analysis import (
@@ -54,6 +55,7 @@ def analyze(
         DistributionAnalyzer,
         MissingAnalyzer,
         OutlierAnalyzer,
+        TargetAnalyzer,
     )
     from emd.charts import ChartRenderer
     from emd.config import ReportConfig
@@ -78,6 +80,7 @@ def analyze(
         output_json=output_json,
         quiet=quiet,
         no_quality_gate=no_quality_gate,
+        target=target,
     )
 
     out_dir = Path(cfg.output_dir) / file.stem
@@ -128,6 +131,17 @@ def analyze(
             lambda: OutlierAnalyzer(use_iforest=cfg.use_iforest).analyze(df),
         )
 
+    target_result = None
+    if cfg.target:
+        if cfg.target not in df.columns:
+            err_console.print(f"[red]Target column '{cfg.target}' not found in dataset.[/red]")
+            err_console.print(f"Available columns: {', '.join(df.columns.tolist())}")
+            raise typer.Exit(1)
+        target_result = _run_step(
+            f"Analysing target '{cfg.target}'",
+            lambda: TargetAnalyzer().analyze(df, cfg.target),  # type: ignore[arg-type]
+        )
+
     # Charts
     renderer = ChartRenderer(out_dir, fmt=cfg.chart_format, dpi=300, theme=cfg.theme)
     chart_paths: dict[str, Path] = {}
@@ -141,6 +155,9 @@ def analyze(
     if outlier_result is not None:
         chart_paths.update(_run_step("Rendering outlier charts",
                                       lambda: renderer.outlier_charts(df, outlier_result)))
+    if target_result is not None:
+        chart_paths.update(_run_step("Rendering target charts",
+                                      lambda: renderer.target_charts(df, target_result)))
 
     # Report
     generator = MarkdownReportGenerator()
@@ -156,6 +173,7 @@ def analyze(
             chart_paths=chart_paths,
             output_dir=out_dir,
             source_name=file.name,
+            target_result=target_result,
         ),
     )
 
@@ -184,6 +202,70 @@ def analyze(
         console.print(f"[dim]Charts in:[/dim] {out_dir / 'charts'}")
         if cfg.output_json:
             console.print(f"[dim]JSON at:[/dim] {out_dir / 'analysis_results.json'}")
+
+
+@app.command()
+def compare(
+    reference: Annotated[Path, typer.Argument(help="Reference dataset (e.g. train.csv)")],
+    current: Annotated[Path, typer.Argument(help="Current dataset (e.g. test.csv)")],
+    output: Annotated[str, typer.Option("--output", "-o")] = "./reports",
+    threshold: Annotated[float, typer.Option("--threshold", help="PSI drift threshold")] = 0.2,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q")] = False,
+) -> None:
+    """Compare two datasets for statistical drift."""
+    from emd.analysis import DriftAnalyzer
+    from emd.charts import ChartRenderer
+    from emd.report import MarkdownReportGenerator
+
+    for p in (reference, current):
+        if not p.exists():
+            err_console.print(f"[red]File not found:[/red] {p}")
+            raise typer.Exit(1)
+
+    def _run_step(label: str, fn):  # type: ignore[no-untyped-def]
+        if not quiet:
+            with Progress(SpinnerColumn(), TextColumn(f"[cyan]{label}..."), transient=True, console=console) as p:
+                p.add_task("", total=None)
+                return fn()
+        return fn()
+
+    df_ref = _run_step("Loading reference", lambda: _load(reference, None, []))
+    df_cur = _run_step("Loading current", lambda: _load(current, None, []))
+
+    drift_result = _run_step(
+        "Analysing drift",
+        lambda: DriftAnalyzer(psi_threshold=threshold).analyze(df_ref, df_cur),
+    )
+
+    out_dir = Path(output) / f"{reference.stem}_vs_{current.stem}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    renderer = ChartRenderer(out_dir)
+    chart_paths = _run_step(
+        "Rendering drift charts",
+        lambda: renderer.drift_charts(df_ref, df_cur, drift_result),
+    )
+
+    report_path = _run_step(
+        "Writing drift report",
+        lambda: MarkdownReportGenerator().generate_drift_report(
+            result=drift_result,
+            chart_paths=chart_paths,
+            output_dir=out_dir,
+            ref_name=reference.name,
+            cur_name=current.name,
+        ),
+    )
+
+    if not quiet:
+        if drift_result.overall_drift:
+            console.print(
+                f"\n[bold red]DATA DRIFT DETECTED[/bold red] — "
+                f"{len(drift_result.drifted_columns)} columns: {', '.join(drift_result.drifted_columns)}"
+            )
+        else:
+            console.print("\n[bold green]No significant drift detected.[/bold green]")
+        console.print(f"[bold green]Report saved:[/bold green] {report_path}")
 
 
 @app.command()

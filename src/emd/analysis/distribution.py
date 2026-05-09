@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -33,6 +33,7 @@ class NumericColumnStats:
     unique_pct: float
     normality_test: str
     normality_pvalue: float | None
+    assumptions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +48,7 @@ class CategoricalColumnStats:
     mode_frequency: int
     entropy: float
     top_values: list[tuple[str, int, float]]  # (value, count, pct)
+    assumptions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -85,7 +87,7 @@ class DistributionAnalyzer:
         arr = clean.to_numpy(dtype=float)
         mean = float(np.mean(arr))
         std = float(np.std(arr, ddof=1)) if n > 1 else 0.0
-        cv = (std / mean) if mean != 0 else None
+        cv = (std / abs(mean)) if mean != 0 else None
 
         mode_result = clean.mode()
         mode_val = float(mode_result.iloc[0]) if len(mode_result) > 0 else None
@@ -101,14 +103,21 @@ class DistributionAnalyzer:
         normality_pvalue = None
         if n >= 8:
             if n <= 5000:
-                stat, pval = stats.shapiro(arr[:5000])
+                _, pval = stats.shapiro(arr)
                 normality_label = "Shapiro-Wilk"
             else:
-                stat, pval = stats.normaltest(arr)
+                _, pval = stats.normaltest(arr)
                 normality_label = "D'Agostino-Pearson"
             normality_pvalue = float(pval)
 
         unique_count = int(clean.nunique())
+
+        assumptions = _check_distribution_assumptions(
+            n=n, mean=mean, median=float(np.median(arr)), std=std,
+            skewness=skewness, excess_kurtosis=excess_kurtosis,
+            normality_label=normality_label, normality_pvalue=normality_pvalue,
+            unique_count=unique_count,
+        )
 
         return NumericColumnStats(
             name=str(s.name),
@@ -135,6 +144,7 @@ class DistributionAnalyzer:
             unique_pct=unique_count / n,
             normality_test=normality_label,
             normality_pvalue=normality_pvalue,
+            assumptions=assumptions,
         )
 
     def _categorical_stats(self, s: pd.Series) -> CategoricalColumnStats:
@@ -156,9 +166,9 @@ class DistributionAnalyzer:
         mode_val = str(value_counts.index[0]) if unique_count > 0 else None
         mode_freq = int(value_counts.iloc[0]) if unique_count > 0 else 0
 
-        # Shannon entropy (normalized 0-1)
-        probs = value_counts / n
-        raw_entropy = float(-np.sum(probs * np.log2(probs + 1e-12)))
+        # Shannon entropy (normalized 0-1) — probs > 0 guaranteed by value_counts
+        probs = (value_counts / n).to_numpy(dtype=float)
+        raw_entropy = float(-np.sum(probs * np.log2(probs)))
         max_entropy = np.log2(unique_count) if unique_count > 1 else 1.0
         entropy = raw_entropy / max_entropy if max_entropy > 0 else 0.0
 
@@ -166,6 +176,8 @@ class DistributionAnalyzer:
             (str(val), int(cnt), float(cnt / n))
             for val, cnt in value_counts.head(10).items()
         ]
+
+        assumptions = _check_categorical_assumptions(n=n, unique_count=unique_count)
 
         return CategoricalColumnStats(
             name=str(s.name),
@@ -178,4 +190,91 @@ class DistributionAnalyzer:
             mode_frequency=mode_freq,
             entropy=entropy,
             top_values=top_values,
+            assumptions=assumptions,
         )
+
+
+def _check_distribution_assumptions(
+    n: int,
+    mean: float,
+    median: float,
+    std: float,
+    skewness: float,
+    excess_kurtosis: float,
+    normality_label: str,
+    normality_pvalue: float | None,
+    unique_count: int,
+) -> list[str]:
+    import math
+    notes: list[str] = []
+
+    if std == 0.0 and n > 1:
+        notes.append(
+            "Zero variance: all non-null values are identical. "
+            "Descriptive statistics are trivial and correlations are undefined."
+        )
+        return notes  # nothing else meaningful to check
+
+    if not math.isnan(skewness):
+        if abs(skewness) > 2.0:
+            direction = "right" if skewness > 0 else "left"
+            notes.append(
+                f"Heavily {direction}-skewed (skew = {skewness:.2f}): "
+                f"mean ({mean:.4g}) is substantially pulled toward the tail. "
+                f"Median ({median:.4g}) and IQR are more robust descriptors for this column."
+            )
+        elif abs(skewness) > 1.0:
+            direction = "right" if skewness > 0 else "left"
+            notes.append(
+                f"Moderately {direction}-skewed (skew = {skewness:.2f}): "
+                f"mean ({mean:.4g}) may overstate the typical value. "
+                f"Consider reporting median ({median:.4g}) alongside mean."
+            )
+
+    if normality_pvalue is not None and normality_pvalue < 0.05:
+        if n > 2000:
+            notes.append(
+                f"Large sample (n = {n:,}): {normality_label} has very high statistical power — "
+                f"even trivially small deviations from normality produce p < 0.05. "
+                f"Use skewness ({skewness:.2f}) and excess kurtosis ({excess_kurtosis:.2f}) "
+                f"to judge practical normality, not the p-value alone."
+            )
+
+    if mean < 0 and not math.isnan(skewness):
+        notes.append(
+            f"Negative mean ({mean:.4g}): CV is computed as std / |mean|. "
+            f"CV is most interpretable for ratio-scale variables (strictly positive)."
+        )
+
+    if unique_count == 1:
+        notes.append(
+            "Only one unique value — this column carries no information and "
+            "should likely be dropped before modelling."
+        )
+    elif n >= 50 and unique_count / n > 0.95:
+        notes.append(
+            f"Very high cardinality ({unique_count} unique values in {n} rows): "
+            f"this may be an ID or free-text column rather than a true numeric feature."
+        )
+
+    return notes
+
+
+def _check_categorical_assumptions(n: int, unique_count: int) -> list[str]:
+    notes: list[str] = []
+    if unique_count == 1:
+        notes.append(
+            "Only one unique category — this column carries no information "
+            "and chi-squared / Cramér's V are undefined."
+        )
+    elif unique_count > 50:
+        notes.append(
+            f"High cardinality ({unique_count} unique values): chi-squared tests and "
+            f"Cramér's V lose statistical power. Frequency-based analysis may be more meaningful."
+        )
+    if n < 30:
+        notes.append(
+            f"Small sample (n = {n}): frequency estimates are unreliable. "
+            f"Interpret entropy and mode frequency with caution."
+        )
+    return notes

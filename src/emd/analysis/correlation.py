@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,7 @@ class CorrelationResult:
     cramers_v: pd.DataFrame | None                   # categorical vs categorical
     point_biserial: list[tuple[str, str, float, float]]  # num_col, bin_col, r, p
     vif: dict[str, float] | None
+    warnings: list[str] = field(default_factory=list)
 
 
 class CorrelationAnalyzer:
@@ -32,6 +33,14 @@ class CorrelationAnalyzer:
         pb = self._point_biserial(num_df, cat_df)
         vif = self._vif(num_df)
 
+        warnings = _check_correlation_assumptions(
+            num_df=num_df,
+            cat_df=cat_df,
+            pearson=pearson,
+            spearman=spearman,
+            vif=vif,
+        )
+
         return CorrelationResult(
             pearson=pearson,
             spearman=spearman,
@@ -39,6 +48,7 @@ class CorrelationAnalyzer:
             cramers_v=cramers,
             point_biserial=pb,
             vif=vif,
+            warnings=warnings,
         )
 
     def _strong_pairs(
@@ -51,7 +61,7 @@ class CorrelationAnalyzer:
         pairs = []
         cols = corr.columns.tolist()
         for i, col_a in enumerate(cols):
-            for col_b in cols[i + 1 :]:
+            for col_b in cols[i + 1:]:
                 r = corr.loc[col_a, col_b]
                 if abs(r) >= threshold:
                     label = "strong positive" if r > 0 else "strong negative"
@@ -110,10 +120,81 @@ class CorrelationAnalyzer:
             clean = num_df.dropna()
             if len(clean) < num_df.shape[1] * 10:
                 return None
-            X = clean.to_numpy(dtype=float)
+            # Intercept column required for correct VIF (avoids uncentered R²)
+            X = np.column_stack([np.ones(len(clean)), clean.to_numpy(dtype=float)])
             return {
-                col: float(variance_inflation_factor(X, i))
+                col: float(variance_inflation_factor(X, i + 1))
                 for i, col in enumerate(clean.columns)
             }
         except Exception:
             return None
+
+
+def _check_correlation_assumptions(
+    num_df: pd.DataFrame,
+    cat_df: pd.DataFrame,
+    pearson: pd.DataFrame | None,
+    spearman: pd.DataFrame | None,
+    vif: dict[str, float] | None,
+) -> list[str]:
+    notes: list[str] = []
+
+    # Pearson vs Spearman discrepancy — signals non-linearity or outlier influence
+    if pearson is not None and spearman is not None:
+        cols = pearson.columns.tolist()
+        for i, col_a in enumerate(cols):
+            for col_b in cols[i + 1:]:
+                p_r = float(pearson.loc[col_a, col_b])
+                s_r = float(spearman.loc[col_a, col_b])
+                diff = abs(p_r - s_r)
+                if diff > 0.15 and abs(s_r) > 0.2:
+                    notes.append(
+                        f"{col_a} × {col_b}: Pearson r = {p_r:.2f} vs Spearman ρ = {s_r:.2f} "
+                        f"(gap = {diff:.2f}). A large gap indicates a non-linear relationship "
+                        f"or strong outlier influence on Pearson. "
+                        f"Spearman is the more reliable measure for non-normal data."
+                    )
+
+    # High VIF — multicollinearity warning
+    if vif:
+        for col, v in vif.items():
+            if v > 10:
+                notes.append(
+                    f"VIF({col}) = {v:.1f} > 10: severe multicollinearity detected. "
+                    f"OLS coefficient estimates for this variable will be unstable. "
+                    f"Consider removing, combining, or regularising collinear features before modelling."
+                )
+            elif v > 5:
+                notes.append(
+                    f"VIF({col}) = {v:.1f} > 5: moderate multicollinearity. "
+                    f"Monitor this variable if using linear regression."
+                )
+
+    # High-cardinality Cramér's V — chi-squared loses power
+    for col in cat_df.columns:
+        u = cat_df[col].nunique()
+        if u > 20:
+            notes.append(
+                f"'{col}' has {u} unique categories: chi-squared (and therefore Cramér's V) "
+                f"loses statistical power with high-cardinality variables. "
+                f"Interpret Cramér's V values with caution — consider grouping rare categories first."
+            )
+
+    # Pearson on heavily skewed numeric columns
+    if num_df.shape[1] >= 2:
+        skewed_cols = []
+        for col in num_df.columns:
+            arr = num_df[col].dropna().to_numpy(dtype=float)
+            if len(arr) >= 3:
+                sk = float(stats.skew(arr))
+                if abs(sk) > 2.0:
+                    skewed_cols.append((col, sk))
+        if len(skewed_cols) >= 2:
+            names = ", ".join(f"{c} (skew={s:.2f})" for c, s in skewed_cols[:3])
+            notes.append(
+                f"Multiple heavily skewed columns ({names}): Pearson correlation assumes "
+                f"linearity and is sensitive to outliers in skewed distributions. "
+                f"Spearman correlation is more appropriate — refer to the Spearman heatmap."
+            )
+
+    return notes

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import typer
 from rich.console import Console
@@ -17,6 +18,8 @@ app = typer.Typer(
     add_completion=True,
     rich_markup_mode="rich",
 )
+schema_app = typer.Typer(name="schema", help="Schema contract generation and validation.")
+app.add_typer(schema_app)
 console = Console()
 err_console = Console(stderr=True)
 
@@ -117,30 +120,37 @@ def analyze(
         color = status_color.get(quality_report.status, "white")
         console.print(f"[{color}]Quality gate: {quality_report.status}[/{color}]")
 
-    dist_result = _run_step("Analysing distributions", lambda: DistributionAnalyzer().analyze(df))
-    missing_result = _run_step("Analysing missing values", lambda: MissingAnalyzer().analyze(df))
+    if cfg.target and cfg.target not in df.columns:
+        err_console.print(f"[red]Target column '{cfg.target}' not found in dataset.[/red]")
+        err_console.print(f"Available columns: {', '.join(df.columns.tolist())}")
+        raise typer.Exit(1)
 
-    corr_result = None
+    _analysis_tasks: dict[str, Any] = {
+        "dist": lambda: DistributionAnalyzer().analyze(df),
+        "missing": lambda: MissingAnalyzer().analyze(df),
+    }
     if not cfg.skip_correlation:
-        corr_result = _run_step("Analysing correlations", lambda: CorrelationAnalyzer().analyze(df))
-
-    outlier_result = None
+        _analysis_tasks["corr"] = lambda: CorrelationAnalyzer().analyze(df)
     if not cfg.skip_outlier:
-        outlier_result = _run_step(
-            "Detecting outliers",
-            lambda: OutlierAnalyzer(use_iforest=cfg.use_iforest).analyze(df),
-        )
-
-    target_result = None
+        _analysis_tasks["outlier"] = lambda: OutlierAnalyzer(use_iforest=cfg.use_iforest).analyze(df)
     if cfg.target:
-        if cfg.target not in df.columns:
-            err_console.print(f"[red]Target column '{cfg.target}' not found in dataset.[/red]")
-            err_console.print(f"Available columns: {', '.join(df.columns.tolist())}")
-            raise typer.Exit(1)
-        target_result = _run_step(
-            f"Analysing target '{cfg.target}'",
-            lambda: TargetAnalyzer().analyze(df, cfg.target),  # type: ignore[arg-type]
-        )
+        _target = cfg.target
+        _analysis_tasks["target"] = lambda: TargetAnalyzer().analyze(df, _target)  # type: ignore[arg-type]
+
+    def _run_all_analyses() -> dict[str, Any]:
+        _res: dict[str, Any] = {}
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(fn): key for key, fn in _analysis_tasks.items()}
+            for future in as_completed(futures):
+                _res[futures[future]] = future.result()
+        return _res
+
+    _results = _run_step("Analysing data", _run_all_analyses)
+    dist_result = _results["dist"]
+    missing_result = _results["missing"]
+    corr_result = _results.get("corr")
+    outlier_result = _results.get("outlier")
+    target_result = _results.get("target")
 
     # Charts
     renderer = ChartRenderer(out_dir, fmt=cfg.chart_format, dpi=300, theme=cfg.theme)
@@ -374,6 +384,7 @@ def info() -> None:
         ("openpyxl", "openpyxl"),
         ("chardet", "chardet"),
         ("typer", "typer"),
+        ("pyyaml", "yaml"),
     ]
     optional = [("scikit-learn (Isolation Forest)", "sklearn")]
 
@@ -394,6 +405,102 @@ def info() -> None:
         table.add_row(name, version, status)
 
     console.print(table)
+
+
+@schema_app.command("init")
+def schema_init(
+    file: Annotated[Path, typer.Argument(help="CSV or XLSX file to generate schema from")],
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output path for schema YAML")] = None,
+    name: Annotated[str, typer.Option("--name", help="Human-readable dataset name")] = "",
+    sheet: Annotated[Optional[str], typer.Option("--sheet", help="XLSX sheet name")] = None,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress output")] = False,
+) -> None:
+    """Generate a YAML schema contract from a data file."""
+    if not file.exists():
+        err_console.print(f"[red]File not found:[/red] {file}")
+        raise typer.Exit(1)
+
+    import pandas as pd
+    from emd.schema.contract import save_contract
+    from emd.schema.generator import ContractGenerator
+
+    df = _load(file, sheet, [])
+    contract_name = name or file.stem
+    contract = ContractGenerator.from_dataframe(df, name=contract_name)
+
+    out_path = output or (file.parent / "schemas" / f"{file.stem}_schema.yaml")
+    save_contract(contract, out_path)
+
+    if not quiet:
+        console.print(f"\n[bold green]Schema contract generated:[/bold green] {out_path}\n")
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Column")
+        table.add_column("Dtype")
+        table.add_column("Required")
+        table.add_column("Missing ≤")
+        table.add_column("Range / Values")
+        for col, rule in contract.columns.items():
+            missing_str = f"{rule.max_missing_pct}%" if rule.max_missing_pct is not None else "—"
+            if rule.dtype == "numeric":
+                range_str = f"[{rule.min}, {rule.max}]" if rule.min is not None else "—"
+            elif rule.allowed_values is not None:
+                vals = rule.allowed_values[:5]
+                range_str = str(vals) + ("…" if len(rule.allowed_values) > 5 else "")
+            else:
+                range_str = "—"
+            table.add_row(col, rule.dtype, str(rule.required), missing_str, range_str)
+        console.print(table)
+        console.print(f"\n[dim]{len(contract.columns)} columns | min_rows={contract.global_rules.min_rows}[/dim]\n")
+
+
+@schema_app.command("validate")
+def schema_validate(
+    file: Annotated[Path, typer.Argument(help="CSV or XLSX file to validate")],
+    schema: Annotated[Path, typer.Option("--schema", "-s", help="Path to schema YAML contract")],
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress output")] = False,
+    strict: Annotated[bool, typer.Option("--strict", help="Treat warnings as errors")] = False,
+    sheet: Annotated[Optional[str], typer.Option("--sheet", help="XLSX sheet name")] = None,
+) -> None:
+    """Validate a data file against a YAML schema contract. Exits 0 on pass, 1 on fail."""
+    if not file.exists():
+        err_console.print(f"[red]File not found:[/red] {file}")
+        raise typer.Exit(1)
+    if not schema.exists():
+        err_console.print(f"[red]Schema not found:[/red] {schema}")
+        raise typer.Exit(1)
+
+    from emd.schema.contract import load_contract
+    from emd.schema.validator import SchemaValidator
+
+    df = _load(file, sheet, [])
+    contract = load_contract(schema)
+    result = SchemaValidator.validate(df, contract, strict=strict)
+
+    if not quiet:
+        if result.violations:
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Column")
+            table.add_column("Check")
+            table.add_column("Expected")
+            table.add_column("Actual")
+            table.add_column("Severity")
+            for v in result.violations:
+                sev_style = "[red]error[/red]" if v.severity == "error" else "[yellow]warning[/yellow]"
+                table.add_row(v.column, v.check, v.expected, v.actual, sev_style)
+            console.print(f"\n[bold]Validation:[/bold] {file.name}  →  schema: {schema.name}\n")
+            console.print(table)
+        if result.passed:
+            console.print(f"\n[bold green]PASSED[/bold green] — {len(result.violations)} warning(s)\n")
+        else:
+            errors = sum(1 for v in result.violations if v.severity == "error")
+            warnings = sum(1 for v in result.violations if v.severity == "warning")
+            console.print(f"\n[bold red]FAILED[/bold red] — {errors} error(s), {warnings} warning(s)\n")
+    elif not result.passed:
+        errors = sum(1 for v in result.violations if v.severity == "error")
+        warnings = sum(1 for v in result.violations if v.severity == "warning")
+        err_console.print(f"Validation failed: {errors} error(s), {warnings} warning(s)")
+
+    raise typer.Exit(0 if result.passed else 1)
 
 
 if __name__ == "__main__":

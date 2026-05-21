@@ -1,0 +1,77 @@
+version: '1.0'
+name: titanic
+description: ''
+global:
+  extra_columns: warn
+  min_rows: 712
+  max_duplicate_pct: 1.0
+columns:
+  PassengerId:
+    dtype: numeric
+    required: true
+    min: 0.9
+    max: 980.1
+    max_missing_pct: 0.0
+  Survived:
+    dtype: numeric
+    required: true
+    min: 0.0
+    max: 1.1
+    max_missing_pct: 0.0
+  Pclass:
+    dtype: numeric
+    required: true
+    min: 0.9
+    max: 3.3
+    max_missing_pct: 0.0
+  Name:
+    dtype: categorical
+    required: true
+    max_missing_pct: 0.0
+  Sex:
+    dtype: categorical
+    required: true
+    max_missing_pct: 0.0
+    allowed_values:
+    - female
+    - male
+  Age:
+    dtype: numeric
+    required: true
+    min: 0.378
+    max: 88.0
+    max_missing_pct: 29.8
+  SibSp:
+    dtype: numeric
+    required: true
+    min: 0.0
+    max: 8.8
+    max_missing_pct: 0.0
+  Parch:
+    dtype: numeric
+    required: true
+    min: 0.0
+    max: 6.6
+    max_missing_pct: 0.0
+  Ticket:
+    dtype: categorical
+    required: true
+    max_missing_pct: 0.0
+  Fare:
+    dtype: numeric
+    required: true
+    min: 0.0
+    max: 563.56212
+    max_missing_pct: 0.0
+  Cabin:
+    dtype: categorical
+    required: true
+    max_missing_pct: 100.0
+  Embarked:
+    dtype: categorical
+    required: true
+    max_missing_pct: 0.3
+    allowed_values:
+    - C
+    - Q
+    - S

@@ -1,0 +1,40 @@
+version: '1.0'
+name: iris
+description: ''
+global:
+  extra_columns: warn
+  min_rows: 120
+  max_duplicate_pct: 2.0
+columns:
+  sepal_length:
+    dtype: numeric
+    required: true
+    min: 3.87
+    max: 8.69
+    max_missing_pct: 0.0
+  sepal_width:
+    dtype: numeric
+    required: true
+    min: 1.8
+    max: 4.84
+    max_missing_pct: 0.0
+  petal_length:
+    dtype: numeric
+    required: true
+    min: 0.9
+    max: 7.59
+    max_missing_pct: 0.0
+  petal_width:
+    dtype: numeric
+    required: true
+    min: 0.09
+    max: 2.75
+    max_missing_pct: 0.0
+  species:
+    dtype: categorical
+    required: true
+    max_missing_pct: 0.0
+    allowed_values:
+    - setosa
+    - versicolor
+    - virginica

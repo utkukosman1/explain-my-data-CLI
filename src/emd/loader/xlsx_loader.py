@@ -10,6 +10,10 @@ from emd.loader.base import BaseLoader
 class XLSXLoader(BaseLoader):
     SUPPORTED_EXTENSIONS = (".xlsx", ".xls", ".xlsm")
 
+    @staticmethod
+    def _engine(path: Path) -> str:
+        return "xlrd" if path.suffix.lower() == ".xls" else "openpyxl"
+
     def load(
         self,
         path: Path,
@@ -21,7 +25,7 @@ class XLSXLoader(BaseLoader):
         df = pd.read_excel(
             path,
             sheet_name=sheet or 0,
-            engine="openpyxl",
+            engine=self._engine(path),
             parse_dates=parse_dates or [],
         )
         df.columns = [str(c).strip() for c in df.columns]
@@ -31,5 +35,5 @@ class XLSXLoader(BaseLoader):
 
     def list_sheets(self, path: Path) -> list[str]:
         self.validate_extension(path)
-        xl = pd.ExcelFile(path, engine="openpyxl")
+        xl = pd.ExcelFile(path, engine=self._engine(path))
         return xl.sheet_names

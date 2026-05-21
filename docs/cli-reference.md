@@ -161,6 +161,160 @@ emd sheets workbook.xlsx
 
 ---
 
+## emd schema init
+
+Reads a data file and generates a YAML schema contract that captures the current dataset's structure as a reusable quality standard. Run this once on a known-good dataset; commit the YAML; validate every future delivery against it.
+
+```bash
+emd schema init <file> [OPTIONS]
+```
+
+**What it captures per column:**
+
+| Column type | Fields written |
+|:------------|:---------------|
+| Numeric | `dtype`, `min` (actual − 10%), `max` (actual + 10%), `max_missing_pct` |
+| Categorical (≤ 20 unique values) | `dtype`, `allowed_values`, `max_missing_pct` |
+| Categorical (> 20 unique values) | `dtype`, `max_missing_pct` |
+| Datetime | `dtype`, `max_missing_pct` |
+
+The 10% buffer on numeric bounds and 1.5× buffer on missing percentages give real pipelines room to breathe while still catching meaningful deviations. A column with 0% missing stays at 0% — no buffer applied.
+
+**Global rules written:**
+
+| Rule | Value |
+|:-----|:------|
+| `min_rows` | 80% of current row count |
+| `max_duplicate_pct` | current duplicate % × 1.5 + 1.0 |
+| `extra_columns` | `warn` (extra columns in future data trigger a warning, not a failure) |
+
+**Options:**
+
+| Option | Default | Description |
+|:-------|:--------|:------------|
+| `--output`, `-o` | `<file_dir>/schemas/<filename>_schema.yaml` | Output path for the YAML contract |
+| `--name` | filename stem | Human-readable dataset name written into the contract |
+| `--sheet` | — | Sheet name for XLSX files |
+| `--quiet`, `-q` | off | Suppress the column summary table |
+
+**Examples:**
+
+```bash
+emd schema init sales.csv
+emd schema init sales.csv --output contracts/sales_schema.yaml --name "Monthly Sales"
+emd schema init data.xlsx --sheet "Raw" --quiet
+```
+
+**Example output (`sales_schema.yaml`):**
+
+```yaml
+version: '1.0'
+name: Monthly Sales
+description: ''
+global:
+  extra_columns: warn
+  min_rows: 800
+  max_duplicate_pct: 1.0
+columns:
+  age:
+    dtype: numeric
+    required: true
+    min: 17.1
+    max: 71.5
+    max_missing_pct: 0.0
+  category:
+    dtype: categorical
+    required: true
+    max_missing_pct: 0.0
+    allowed_values:
+    - A
+    - B
+    - C
+```
+
+---
+
+## emd schema validate
+
+Validates a data file against a previously generated YAML schema contract. Designed for CI/CD pipelines — exits 0 on pass, 1 on failure.
+
+```bash
+emd schema validate <file> --schema <schema.yaml> [OPTIONS]
+```
+
+**Checks performed, in order:**
+
+1. **Global: row count** — fails if `len(df) < min_rows`
+2. **Global: duplicate rows** — fails if duplicate percentage exceeds `max_duplicate_pct`
+3. **Required columns** — fails for each column marked `required: true` that is absent
+4. **Extra columns** — warns (or fails if `extra_columns: fail`) for columns not in the contract
+5. **Per-column dtype** — fails if the actual dtype doesn't match; skips further checks for that column
+6. **Per-column missing %** — fails if `null %` exceeds `max_missing_pct`
+7. **Numeric bounds** — fails if any value is below `min` or above `max`
+8. **Categorical values** — warns if values outside `allowed_values` are found
+
+Warnings do not cause a failure by default. Use `--strict` to promote all warnings to errors.
+
+**Options:**
+
+| Option | Default | Description |
+|:-------|:--------|:------------|
+| `--schema`, `-s` | *(required)* | Path to the YAML schema contract |
+| `--strict` | off | Treat warnings as errors (exit 1 if any warning fires) |
+| `--quiet`, `-q` | off | No output on pass; only violation count on fail (pure exit-code mode) |
+| `--sheet` | — | Sheet name for XLSX files |
+
+**Exit codes:**
+
+| Code | Meaning |
+|:-----|:--------|
+| `0` | All checks passed (warnings may exist unless `--strict`) |
+| `1` | One or more errors (or warnings with `--strict`) |
+
+**Examples:**
+
+```bash
+# Basic validation
+emd schema validate sales_feb.csv --schema sales_schema.yaml
+
+# Strict mode — warnings also block the pipeline
+emd schema validate sales_feb.csv --schema sales_schema.yaml --strict
+
+# Silent mode for CI/CD — no output on success, violation count on failure
+emd schema validate sales_feb.csv --schema sales_schema.yaml --quiet
+echo "Exit code: $?"
+```
+
+**CI/CD integration examples:**
+
+```yaml
+# GitHub Actions step
+- name: Validate incoming data
+  run: emd schema validate data/latest.csv --schema contracts/schema.yaml --quiet
+
+# Airflow BashOperator
+BashOperator(
+    task_id="validate_data",
+    bash_command="emd schema validate {{ params.file }} --schema {{ params.schema }} --quiet",
+)
+```
+
+**Example output (with violations):**
+
+```
+Validation: sales_feb.csv  →  schema: sales_schema.yaml
+
+ Column      Check             Expected          Actual
+ ──────────────────────────────────────────────────────────────────────
+ __global__  min_rows          >= 800            650
+ category    allowed_values    subset of [A,B,C] unexpected: ['D']
+ income      max_missing_pct   <= 0.0%           14.2%
+
+FAILED — 2 error(s), 1 warning(s)
+```
+
+---
+
 ## emd info
 
 Shows the installed version of `emd` and the status of all dependencies, including optional ones.

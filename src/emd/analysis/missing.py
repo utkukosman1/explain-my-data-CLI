@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 import numpy as np
@@ -70,10 +71,9 @@ class MissingAnalyzer:
             return []
 
         mask = df[missing_cols].isna()
-        pattern_counts: dict[tuple[bool, ...], int] = {}
-        for row in mask.itertuples(index=False):
-            key = tuple(row)
-            pattern_counts[key] = pattern_counts.get(key, 0) + 1
+        pattern_counts: dict[tuple[bool, ...], int] = Counter(
+            map(tuple, mask.to_numpy())
+        )
 
         n = len(df)
         patterns = []

@@ -10,12 +10,12 @@ COPY src/ ./src/
 RUN pip install --no-cache-dir -e .
 
 # Install backend-specific deps
-COPY backend/requirements.txt ./backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt
+COPY web/backend/requirements.txt ./web/backend/requirements.txt
+RUN pip install --no-cache-dir -r web/backend/requirements.txt
 
-COPY backend/ ./backend/
+COPY web/backend/ ./web/backend/
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

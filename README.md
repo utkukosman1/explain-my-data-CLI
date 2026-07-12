@@ -2,6 +2,8 @@
 
 > Explain My Data — instant EDA reports from any CSV or Excel file.
 
+![emd analyze demo](assets/demo.gif)
+
 ## Why
 
 Every new dataset starts with the same half-hour of boilerplate: check distributions, scan for missing values, eyeball correlations, hunt for outliers. `emd` runs that entire first pass in one command and turns it into a single Markdown report with charts, so you can skip straight to the interesting questions. It's built for data scientists and analysts who want a fast, repeatable first look at a file before opening a notebook. It also detects statistical drift between two datasets, which makes it useful for monitoring train/test splits or production data in an MLOps pipeline. No config, no setup beyond installing it — point it at a file and read the report.

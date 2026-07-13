@@ -302,16 +302,21 @@ BashOperator(
 **Example output (with violations):**
 
 ```
-Validation: sales_feb.csv  →  schema: sales_schema.yaml
+Validation: sales_feb.csv  ->  schema: sales_schema.yaml
 
- Column      Check             Expected          Actual
- ──────────────────────────────────────────────────────────────────────
- __global__  min_rows          >= 800            650
- category    allowed_values    subset of [A,B,C] unexpected: ['D']
- income      max_missing_pct   <= 0.0%           14.2%
+┌────────────┬─────────────────┬─────────────────────┬─────────────────┬──────────┐
+│ Column     │ Check           │ Expected             │ Actual           │ Severity │
+├────────────┼─────────────────┼─────────────────────┼──────────────────┼──────────┤
+│ __global__ │ min_rows        │ >= 800               │ 650              │ error    │
+│ category   │ allowed_values  │ subset of ['A', 'B', │ unexpected:      │ warning  │
+│            │                 │ 'C']                 │ ['D']            │          │
+│ income     │ max_missing_pct │ <= 0.0%              │ 14.2%            │ error    │
+└────────────┴─────────────────┴─────────────────────┴──────────────────┴──────────┘
 
 FAILED — 2 error(s), 1 warning(s)
 ```
+
+The table is rendered by [Rich](https://github.com/Textualize/rich) and wraps wide cells (like long `allowed_values` lists) onto multiple lines rather than truncating — the exact column widths depend on your terminal width.
 
 ---
 

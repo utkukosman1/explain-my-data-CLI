@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+STRONG_CORRELATION_THRESHOLD = 0.7
+
 
 @dataclass
 class CorrelationResult:
@@ -54,7 +56,7 @@ class CorrelationAnalyzer:
     def _strong_pairs(
         self,
         corr: pd.DataFrame | None,
-        threshold: float = 0.7,
+        threshold: float = STRONG_CORRELATION_THRESHOLD,
     ) -> list[tuple[str, str, float, str]]:
         if corr is None:
             return []

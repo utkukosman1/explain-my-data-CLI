@@ -32,8 +32,8 @@ class CSVLoader(BaseLoader):
         raw = path.read_bytes()[:65536]
         result = chardet.detect(raw)
         encoding = result.get("encoding") or "utf-8"
-        # Normalise common aliases
-        if encoding.lower() in ("ascii", "windows-1252"):
+        # ASCII is a strict subset of UTF-8, so normalising is safe.
+        if encoding.lower() == "ascii":
             encoding = "utf-8"
         return encoding
 

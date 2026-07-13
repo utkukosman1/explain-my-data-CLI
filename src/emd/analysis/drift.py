@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+PSI_MODERATE_THRESHOLD = 0.1
+
 
 @dataclass
 class ColumnDrift:
@@ -169,7 +171,7 @@ class DriftAnalyzer:
         return max(0.0, psi)
 
     def _psi_severity(self, psi: float) -> str:
-        if psi < 0.1:
+        if psi < PSI_MODERATE_THRESHOLD:
             return "none"
         if psi < self.psi_threshold:
             return "moderate"

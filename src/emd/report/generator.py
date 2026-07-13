@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
 from emd import __version__
-from emd.analysis.correlation import CorrelationResult
+from emd.analysis.correlation import STRONG_CORRELATION_THRESHOLD, CorrelationResult
 from emd.analysis.distribution import DistributionResult
 from emd.analysis.drift import DriftResult
 from emd.analysis.missing import MissingResult
 from emd.analysis.outlier import OutlierResult
 from emd.analysis.target import TargetResult
 from emd.quality.checker import QualityReport
+
+
+def _slugify(heading: str) -> str:
+    """GitHub-flavored-Markdown-style heading anchor, so ToC links match the rendered heading."""
+    slug = re.sub(r"[^\w\s-]", "", heading.lower())
+    return re.sub(r"\s+", "-", slug.strip())
 
 
 class MarkdownReportGenerator:
@@ -34,21 +41,27 @@ class MarkdownReportGenerator:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         rows, cols = df.shape
 
-        toc = [
-            "1. [Data Quality Summary](#1-data-quality-summary)",
-            "2. [Dataset Overview](#2-dataset-overview)",
-            "3. [Distribution Analysis](#3-distribution-analysis)",
+        headings = [
+            (1, "Data Quality Summary"),
+            (2, "Dataset Overview"),
+            (3, "Distribution Analysis"),
         ]
         section_num = 4
+        target_num: int | None = None
         if target_result is not None:
-            toc.append(f"{section_num}. [Key Insights — Target: {target_result.target_col}](#key-insights)")
+            target_num = section_num
+            headings.append((target_num, f"Key Insights — Target: {target_result.target_col}"))
             section_num += 1
-        toc += [
-            f"{section_num}. [Correlation Analysis](#correlation-analysis)",
-            f"{section_num+1}. [Missing Value Analysis](#missing-value-analysis)",
-            f"{section_num+2}. [Outlier Detection](#outlier-detection)",
-            f"{section_num+3}. [Appendix](#appendix)",
+        correlation_num, missing_num, outlier_num, appendix_num = (
+            section_num, section_num + 1, section_num + 2, section_num + 3,
+        )
+        headings += [
+            (correlation_num, "Correlation Analysis"),
+            (missing_num, "Missing Value Analysis"),
+            (outlier_num, "Outlier Detection"),
+            (appendix_num, "Appendix"),
         ]
+        toc = [f"{n}. [{title}](#{_slugify(f'{n}. {title}')})" for n, title in headings]
 
         lines += [
             f"# EDA Report — {source_name}",
@@ -67,12 +80,12 @@ class MarkdownReportGenerator:
         lines += self._quality_section(quality_report)
         lines += self._overview_section(df)
         lines += self._distribution_section(df, dist_result, chart_paths)
-        if target_result is not None:
-            lines += self._target_section(target_result, chart_paths)
-        lines += self._correlation_section(corr_result, chart_paths)
-        lines += self._missing_section(missing_result, chart_paths)
-        lines += self._outlier_section(outlier_result, chart_paths)
-        lines += self._appendix_section(dist_result)
+        if target_result is not None and target_num is not None:
+            lines += self._target_section(target_result, chart_paths, target_num)
+        lines += self._correlation_section(corr_result, chart_paths, correlation_num)
+        lines += self._missing_section(missing_result, chart_paths, missing_num)
+        lines += self._outlier_section(outlier_result, chart_paths, outlier_num)
+        lines += self._appendix_section(dist_result, appendix_num)
 
         report_path = output_dir / "report.md"
         report_path.write_text("\n".join(lines), encoding="utf-8")
@@ -198,16 +211,16 @@ class MarkdownReportGenerator:
         for col in df.columns:
             dtype = str(df[col].dtype)
             non_null = int(df[col].notna().sum())
-            null_pct = df[col].isna().mean() * 100
-            lines.append(f"| {col} | {dtype} | {non_null:,} | {null_pct:.2f}% |")
+            null_pct = df[col].isna().mean()
+            lines.append(f"| {col} | {dtype} | {non_null:,} | {null_pct:.1%} |")
         lines += ["", "---", ""]
         return lines
 
     def _target_section(
-        self, result: TargetResult, chart_paths: dict[str, Path]
+        self, result: TargetResult, chart_paths: dict[str, Path], section_num: int
     ) -> list[str]:
         lines = [
-            f"## Key Insights — Target: {result.target_col}",
+            f"## {section_num}. Key Insights — Target: {result.target_col}",
             "",
             f"**Target type:** {result.target_type}",
             "",
@@ -254,7 +267,7 @@ class MarkdownReportGenerator:
             for s in result.numeric:
                 pval = f"{s.normality_pvalue:.4f}" if s.normality_pvalue is not None else "N/A"
                 lines.append(
-                    f"| {s.name} | {s.count:,} | {s.null_pct:.2%} "
+                    f"| {s.name} | {s.count:,} | {s.null_pct:.1%} "
                     f"| {_fmt(s.mean)} | {_fmt(s.median)} | {_fmt(s.std)} "
                     f"| {_fmt(s.skewness)} | {_fmt(s.excess_kurtosis)} "
                     f"| {_fmt(s.min)} | {_fmt(s.max)} | {pval} |"
@@ -287,7 +300,7 @@ class MarkdownReportGenerator:
             ]
             for s in result.categorical:
                 lines.append(
-                    f"| {s.name} | {s.count:,} | {s.null_pct:.2%} | {s.unique_count} "
+                    f"| {s.name} | {s.count:,} | {s.null_pct:.1%} | {s.unique_count} "
                     f"| {s.mode or 'N/A'} | {s.mode_frequency} | {s.entropy:.3f} |"
                 )
             lines.append("")
@@ -309,9 +322,9 @@ class MarkdownReportGenerator:
         return lines
 
     def _correlation_section(
-        self, result: CorrelationResult | None, chart_paths: dict[str, Path]
+        self, result: CorrelationResult | None, chart_paths: dict[str, Path], section_num: int
     ) -> list[str]:
-        lines = ["## 4. Correlation Analysis", ""]
+        lines = [f"## {section_num}. Correlation Analysis", ""]
         if result is None:
             lines += ["> Correlation analysis was skipped.", "", "---", ""]
             return lines
@@ -324,7 +337,7 @@ class MarkdownReportGenerator:
 
         if result.strong_pairs:
             lines += [
-                "### Strongest Correlations (|r| ≥ 0.7)",
+                f"### Strongest Correlations (|r| ≥ {STRONG_CORRELATION_THRESHOLD})",
                 "",
                 "| Column A | Column B | Pearson r | Type |",
                 "|:---------|:---------|----------:|:-----|",
@@ -358,14 +371,14 @@ class MarkdownReportGenerator:
         return lines
 
     def _missing_section(
-        self, result: MissingResult, chart_paths: dict[str, Path]
+        self, result: MissingResult, chart_paths: dict[str, Path], section_num: int
     ) -> list[str]:
         lines = [
-            "## 5. Missing Value Analysis",
+            f"## {section_num}. Missing Value Analysis",
             "",
             f"- **Total cells:** {result.total_cells:,}",
-            f"- **Total missing:** {result.total_missing:,} ({result.global_missing_pct:.2%})",
-            f"- **Complete rows:** {result.complete_rows:,} ({result.complete_rows_pct:.2%})",
+            f"- **Total missing:** {result.total_missing:,} ({result.global_missing_pct:.1%})",
+            f"- **Complete rows:** {result.complete_rows:,} ({result.complete_rows_pct:.1%})",
             "",
         ]
 
@@ -377,7 +390,8 @@ class MarkdownReportGenerator:
             ]
             for c in sorted(cols_with_missing, key=lambda x: -x.missing_pct):
                 lines.append(
-                    f"| {c.name} | {c.missing_count:,} | {c.missing_pct:.2%} | {c.present_count:,} |"
+                    f"| {c.name} | {c.missing_count:,} | {c.missing_pct:.1%} "
+                    f"| {c.present_count:,} |"
                 )
             lines.append("")
             if "missing_bar" in chart_paths:
@@ -395,7 +409,7 @@ class MarkdownReportGenerator:
             ]
             for p in result.patterns[:10]:
                 pattern_str = ", ".join(f"{k}" for k, v in p.pattern.items() if v)
-                lines.append(f"| {pattern_str} | {p.row_count:,} | {p.row_pct:.2%} |")
+                lines.append(f"| {pattern_str} | {p.row_count:,} | {p.row_pct:.1%} |")
             lines.append("")
 
         if result.correlated_pairs:
@@ -406,16 +420,16 @@ class MarkdownReportGenerator:
                 "|:---------|:---------|----------------:|",
             ]
             for a, b, p in result.correlated_pairs[:10]:
-                lines.append(f"| {a} | {b} | {p:.2%} |")
+                lines.append(f"| {a} | {b} | {p:.1%} |")
             lines.append("")
 
         lines += ["---", ""]
         return lines
 
     def _outlier_section(
-        self, result: OutlierResult | None, chart_paths: dict[str, Path]
+        self, result: OutlierResult | None, chart_paths: dict[str, Path], section_num: int
     ) -> list[str]:
-        lines = ["## 6. Outlier Detection", ""]
+        lines = [f"## {section_num}. Outlier Detection", ""]
         if result is None:
             lines += ["> Outlier detection was skipped.", "", "---", ""]
             return lines
@@ -428,7 +442,7 @@ class MarkdownReportGenerator:
         ]
         for c in result.columns:
             lines.append(
-                f"| {c.name} | {c.iqr_count} | {c.iqr_pct:.2%} | {c.iqr_extreme_count} "
+                f"| {c.name} | {c.iqr_count} | {c.iqr_pct:.1%} | {c.iqr_extreme_count} "
                 f"| {c.zscore_count} | {c.mzscore_count} |"
             )
         lines.append("")
@@ -453,8 +467,10 @@ class MarkdownReportGenerator:
         lines += ["---", ""]
         return lines
 
-    def _appendix_section(self, result: DistributionResult) -> list[str]:
-        lines = ["## 7. Appendix", "", "### Full Percentile Table (Numeric Columns)", ""]
+    def _appendix_section(self, result: DistributionResult, section_num: int) -> list[str]:
+        lines = [
+            f"## {section_num}. Appendix", "", "### Full Percentile Table (Numeric Columns)", "",
+        ]
         if result.numeric:
             lines += [
                 "| Column | p5 | p25 | p50 | p75 | p95 | IQR |",
@@ -479,6 +495,7 @@ class MarkdownReportGenerator:
         missing_result: MissingResult,
         outlier_result: OutlierResult | None,
         output_dir: Path,
+        target_result: TargetResult | None = None,
     ) -> Path:
         import dataclasses
 
@@ -512,6 +529,8 @@ class MarkdownReportGenerator:
             }
         if outlier_result is not None:
             payload["outlier"] = _safe(outlier_result)
+        if target_result is not None:
+            payload["target"] = _safe(target_result)
 
         out_path = output_dir / "analysis_results.json"
         out_path.write_text(json.dumps(payload, default=str, indent=2), encoding="utf-8")
@@ -526,8 +545,6 @@ def _fmt(val: float | None, sig: int = 4) -> str:
         return "N/A"
     if val == 0:
         return "0"
-    if abs(val) >= 1000 or (abs(val) < 0.001 and val != 0):
-        return f"{val:.{sig}g}"
     return f"{val:.{sig}g}"
 
 

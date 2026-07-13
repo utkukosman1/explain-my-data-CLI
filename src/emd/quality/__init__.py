@@ -1,3 +1,9 @@
-from emd.quality.checker import QualityChecker, QualityIssue, QualityReport, Severity
+from emd.quality.checker import (
+    DataQualityError,
+    QualityChecker,
+    QualityIssue,
+    QualityReport,
+    Severity,
+)
 
-__all__ = ["QualityChecker", "QualityIssue", "QualityReport", "Severity"]
+__all__ = ["DataQualityError", "QualityChecker", "QualityIssue", "QualityReport", "Severity"]

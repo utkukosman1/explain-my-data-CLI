@@ -52,6 +52,44 @@ emd analyze data.csv --output-json --quiet   # JSON to stdout for scripting
 
 ---
 
+## emd summary
+
+Prints a fast terminal recap of a dataset — a ranked list of Key Issues plus an At a Glance table. Nothing is written to disk: no charts, no `report.md`, no JSON. It runs the same analyzers as `emd analyze` but skips chart rendering and report generation, making it the quickest way to get oriented on a new file before committing to a full report.
+
+```bash
+emd summary <file> [OPTIONS]
+```
+
+**What it does — in order:**
+1. Loads the file (auto-detects encoding and delimiter for CSV)
+2. Runs the data quality gate — aborts on FATAL issues, logs warnings otherwise
+3. Runs distribution, missing value, correlation, and outlier analysis
+4. Prints **Key Issues**: up to 5 findings, prioritized by severity (constant/zero-variance columns, then duplicate rows, high missingness, severe multicollinearity, strong correlations, identifier-like columns, heavy skew, and outlier concentration). Prints "No significant issues detected." if nothing qualifies.
+5. Prints **At a Glance**: row/column counts, missing %, duplicate row count, numeric/categorical feature counts, and the target column if `--target` was given
+
+**Options:**
+
+| Option | Default | Description |
+|:-------|:--------|:------------|
+| `--target` | — | Column name to show in the At a Glance table |
+| `--sheet` | — | Sheet name for XLSX files |
+| `--parse-dates` | — | Comma-separated column names to parse as dates |
+| `--drop-cols` | — | Comma-separated columns to exclude before analysis |
+| `--sample` | — | Analyze a random sample of N rows |
+| `--skip-correlation` | off | Skip correlation analysis (faster run) |
+| `--skip-outlier` | off | Skip outlier detection |
+| `--no-quality-gate` | off | Continue even if quality gate returns FATAL |
+
+**Examples:**
+
+```bash
+emd summary data.csv
+emd summary data.csv --target SalePrice
+emd summary big_file.csv --sample 10000
+```
+
+---
+
 ## emd compare
 
 Compares two datasets for statistical distribution shift (data drift). Useful for MLOps pipelines, monitoring production data, or comparing train/test splits.

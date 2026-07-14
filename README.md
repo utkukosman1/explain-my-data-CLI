@@ -45,6 +45,7 @@ Produces `reports/<filename>/report.md` with embedded charts — distributions, 
 ## More commands
 
 ```bash
+emd summary data.csv                         # fast terminal recap — no files written
 emd analyze titanic.csv --target Survived    # feature importance vs. a target column
 emd compare train.csv test.csv               # drift detection between two datasets
 emd check data.csv                           # quality check only, no report

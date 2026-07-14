@@ -1,7 +1,6 @@
 import math
 
 import pandas as pd
-import pytest
 
 from emd.analysis import DistributionAnalyzer
 

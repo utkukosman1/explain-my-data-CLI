@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from emd.schema.contract import ColumnRule, GlobalRule, SchemaContract, load_contract, save_contract
 from emd.schema.generator import ContractGenerator
-from emd.schema.validator import SchemaValidator, Violation
-
+from emd.schema.validator import SchemaValidator
 
 # ---------------------------------------------------------------------------
 # Generation tests
@@ -78,7 +76,9 @@ def test_validation_fails_missing_required_column(simple_df: pd.DataFrame) -> No
     df_missing_col = simple_df.drop(columns=["age"])
     result = SchemaValidator.validate(df_missing_col, contract)
     assert result.passed is False
-    required_violations = [v for v in result.violations if v.check == "required" and v.column == "age"]
+    required_violations = [
+        v for v in result.violations if v.check == "required" and v.column == "age"
+    ]
     assert len(required_violations) == 1
     assert required_violations[0].severity == "error"
 
@@ -134,7 +134,9 @@ def test_validation_extra_column_warn() -> None:
     )
     df = pd.DataFrame({"a": [1.0], "b": [2.0]})
     result = SchemaValidator.validate(df, contract)
-    extra_violations = [v for v in result.violations if v.check == "extra_column" and v.column == "b"]
+    extra_violations = [
+        v for v in result.violations if v.check == "extra_column" and v.column == "b"
+    ]
     assert len(extra_violations) == 1
     assert extra_violations[0].severity == "warning"
     assert result.passed is True  # still passes — only a warning
@@ -145,7 +147,9 @@ def test_validation_missing_pct_exceeded(df_with_missing: pd.DataFrame) -> None:
         columns={"income": ColumnRule(dtype="numeric", max_missing_pct=0.0)},
     )
     result = SchemaValidator.validate(df_with_missing, contract)
-    miss_violations = [v for v in result.violations if v.check == "max_missing_pct" and v.column == "income"]
+    miss_violations = [
+        v for v in result.violations if v.check == "max_missing_pct" and v.column == "income"
+    ]
     assert len(miss_violations) == 1
     assert miss_violations[0].severity == "error"
 

@@ -12,7 +12,9 @@ from emd.loader.base import BaseLoader
 class CSVLoader(BaseLoader):
     SUPPORTED_EXTENSIONS = (".csv", ".tsv", ".txt")
 
-    def load(self, path: Path, parse_dates: list[str] | None = None, **kwargs: object) -> pd.DataFrame:
+    def load(
+        self, path: Path, parse_dates: list[str] | None = None, **kwargs: object
+    ) -> pd.DataFrame:
         self.validate_extension(path)
         encoding = self._detect_encoding(path)
         delimiter = self._detect_delimiter(path, encoding)

@@ -40,13 +40,15 @@ def _infer_dtype(series: pd.Series) -> str:
 
 class SchemaValidator:
     @classmethod
-    def validate(cls, df: pd.DataFrame, contract: SchemaContract, strict: bool = False) -> ValidationResult:
+    def validate(
+        cls, df: pd.DataFrame, contract: SchemaContract, strict: bool = False
+    ) -> ValidationResult:
         result = ValidationResult()
 
         # Step 1 — global min_rows
-        if contract.global_rules.min_rows is not None:
-            if len(df) < contract.global_rules.min_rows:
-                result.add(Violation(
+        min_rows = contract.global_rules.min_rows
+        if min_rows is not None and len(df) < min_rows:
+            result.add(Violation(
                     column="__global__",
                     check="min_rows",
                     expected=f">= {contract.global_rules.min_rows}",

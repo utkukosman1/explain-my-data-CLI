@@ -8,8 +8,14 @@ from emd.analysis.drift import DriftAnalyzer
 @pytest.fixture
 def df_no_drift() -> tuple[pd.DataFrame, pd.DataFrame]:
     rng = np.random.default_rng(0)
-    ref = pd.DataFrame({"a": rng.normal(0, 1, 500), "b": rng.normal(10, 2, 500), "cat": rng.choice(["X", "Y"], 500)})
-    cur = pd.DataFrame({"a": rng.normal(0, 1, 400), "b": rng.normal(10, 2, 400), "cat": rng.choice(["X", "Y"], 400)})
+    ref = pd.DataFrame({
+        "a": rng.normal(0, 1, 500), "b": rng.normal(10, 2, 500),
+        "cat": rng.choice(["X", "Y"], 500),
+    })
+    cur = pd.DataFrame({
+        "a": rng.normal(0, 1, 400), "b": rng.normal(10, 2, 400),
+        "cat": rng.choice(["X", "Y"], 400),
+    })
     return ref, cur
 
 

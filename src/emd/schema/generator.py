@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 import pandas as pd
 
 from emd.schema.contract import ColumnRule, GlobalRule, SchemaContract
@@ -13,7 +11,9 @@ class ContractGenerator:
     MISSING_PCT_BUFFER = 1.5
 
     @classmethod
-    def from_dataframe(cls, df: pd.DataFrame, name: str = "", description: str = "") -> SchemaContract:
+    def from_dataframe(
+        cls, df: pd.DataFrame, name: str = "", description: str = ""
+    ) -> SchemaContract:
         columns: dict[str, ColumnRule] = {}
         for col in df.columns:
             columns[col] = cls._make_column_rule(df[col])
@@ -51,7 +51,9 @@ class ContractGenerator:
         if actual_missing_pct == 0.0:
             max_missing_pct = 0.0
         else:
-            max_missing_pct = round(float(min(actual_missing_pct * cls.MISSING_PCT_BUFFER, 100.0)), 1)
+            max_missing_pct = round(
+                float(min(actual_missing_pct * cls.MISSING_PCT_BUFFER, 100.0)), 1
+            )
 
         if dtype == "numeric":
             non_null = series.dropna()

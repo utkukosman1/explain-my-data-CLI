@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 import pandas as pd
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     FATAL = "FATAL"
     WARNING = "WARNING"
     INFO = "INFO"
@@ -97,12 +97,14 @@ class QualityChecker:
             report.add(QualityIssue(
                 check="High duplicates",
                 severity=Severity.WARNING,
-                result=f"{dup_pct:.1%} of rows are exact duplicates ({int(dup_pct * len(df))} rows)",
+                result=(
+                    f"{dup_pct:.1%} of rows are exact duplicates ({int(dup_pct * len(df))} rows)"
+                ),
                 recommendation="De-duplicate before analysis to avoid skewed statistics",
             ))
 
     def _check_all_object_dtype(self, df: pd.DataFrame, report: QualityReport) -> None:
-        all_object = all(dtype == object for dtype in df.dtypes)
+        all_object = all(pd.api.types.is_object_dtype(dtype) for dtype in df.dtypes)
         if all_object and df.shape[1] > 1:
             report.add(QualityIssue(
                 check="All-object dtypes",
@@ -128,6 +130,11 @@ class QualityChecker:
                 report.add(QualityIssue(
                     check=f"Mixed types: {col}",
                     severity=Severity.WARNING,
-                    result=f"Column '{col}' is {numeric_share:.1%} numeric — may be a mixed-type column",
-                    recommendation=f"Inspect '{col}' for rogue non-numeric values or encoding issues",
+                    result=(
+                        f"Column '{col}' is {numeric_share:.1%} numeric — "
+                        f"may be a mixed-type column"
+                    ),
+                    recommendation=(
+                        f"Inspect '{col}' for rogue non-numeric values or encoding issues"
+                    ),
                 ))

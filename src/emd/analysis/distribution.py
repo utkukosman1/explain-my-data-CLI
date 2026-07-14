@@ -231,14 +231,13 @@ def _check_distribution_assumptions(
                 f"Consider reporting median ({median:.4g}) alongside mean."
             )
 
-    if normality_pvalue is not None and normality_pvalue < 0.05:
-        if n > 2000:
-            notes.append(
-                f"Large sample (n = {n:,}): {normality_label} has very high statistical power — "
-                f"even trivially small deviations from normality produce p < 0.05. "
-                f"Use skewness ({skewness:.2f}) and excess kurtosis ({excess_kurtosis:.2f}) "
-                f"to judge practical normality, not the p-value alone."
-            )
+    if normality_pvalue is not None and normality_pvalue < 0.05 and n > 2000:
+        notes.append(
+            f"Large sample (n = {n:,}): {normality_label} has very high statistical power — "
+            f"even trivially small deviations from normality produce p < 0.05. "
+            f"Use skewness ({skewness:.2f}) and excess kurtosis ({excess_kurtosis:.2f}) "
+            f"to judge practical normality, not the p-value alone."
+        )
 
     if mean < 0 and not math.isnan(skewness):
         notes.append(

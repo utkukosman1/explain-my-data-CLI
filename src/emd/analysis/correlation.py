@@ -123,9 +123,9 @@ class CorrelationAnalyzer:
             if len(clean) < num_df.shape[1] * 10:
                 return None
             # Intercept column required for correct VIF (avoids uncentered R²)
-            X = np.column_stack([np.ones(len(clean)), clean.to_numpy(dtype=float)])
+            design = np.column_stack([np.ones(len(clean)), clean.to_numpy(dtype=float)])
             return {
-                col: float(variance_inflation_factor(X, i + 1))
+                col: float(variance_inflation_factor(design, i + 1))
                 for i, col in enumerate(clean.columns)
             }
         except Exception:
@@ -164,7 +164,8 @@ def _check_correlation_assumptions(
                 notes.append(
                     f"VIF({col}) = {v:.1f} > 10: severe multicollinearity detected. "
                     f"OLS coefficient estimates for this variable will be unstable. "
-                    f"Consider removing, combining, or regularising collinear features before modelling."
+                    f"Consider removing, combining, or regularising collinear features "
+                    f"before modelling."
                 )
             elif v > 5:
                 notes.append(
@@ -179,7 +180,8 @@ def _check_correlation_assumptions(
             notes.append(
                 f"'{col}' has {u} unique categories: chi-squared (and therefore Cramér's V) "
                 f"loses statistical power with high-cardinality variables. "
-                f"Interpret Cramér's V values with caution — consider grouping rare categories first."
+                f"Interpret Cramér's V values with caution — consider grouping rare "
+                f"categories first."
             )
 
     # Pearson on heavily skewed numeric columns

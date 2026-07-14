@@ -202,7 +202,6 @@ def _check_target_assumptions(
 
     else:
         # Numeric target — check if Pearson is appropriate (target skewness)
-        import numpy as np
         arr = target.dropna().to_numpy(dtype=float)
         if len(arr) >= 3:
             target_skew = float(stats.skew(arr))

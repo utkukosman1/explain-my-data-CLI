@@ -17,6 +17,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
@@ -56,6 +57,21 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+# mypy uses the running interpreter's version so its stub parsing always matches
+# the installed numpy/pandas generation (numpy 2.5+ stubs need 3.12+ syntax).
+[[tool.mypy.overrides]]
+module = [
+    "pandas.*",
+    "scipy.*",
+    "seaborn.*",
+    "matplotlib.*",
+    "statsmodels.*",
+    "sklearn.*",
+    "chardet.*",
+    "yaml.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -10,6 +10,13 @@ import pandas as pd
 from emd import __version__
 from emd.analysis.correlation import STRONG_CORRELATION_THRESHOLD, CorrelationResult
 from emd.analysis.distribution import DistributionResult
+from emd.analysis.doctor import (
+    CATEGORY_CAP,
+    CATEGORY_ORDER,
+    PENALTIES,
+    DoctorResult,
+    DoctorSeverity,
+)
 from emd.analysis.drift import DriftResult
 from emd.analysis.missing import MissingResult
 from emd.analysis.outlier import OutlierResult
@@ -66,7 +73,8 @@ class MarkdownReportGenerator:
         lines += [
             f"# EDA Report — {source_name}",
             "",
-            f"**Generated:** {now}  |  **Rows:** {rows:,}  |  **Columns:** {cols}  |  **emd version:** {__version__}",
+            f"**Generated:** {now}  |  **Rows:** {rows:,}  |  **Columns:** {cols}  |  "
+            f"**emd version:** {__version__}",
             "",
             "---",
             "",
@@ -120,11 +128,12 @@ class MarkdownReportGenerator:
             "",
             "## Summary",
             "",
-            f"| | Reference | Current |",
-            f"|:--|----------:|--------:|",
+            "| | Reference | Current |",
+            "|:--|----------:|--------:|",
             f"| Rows | {result.reference_shape[0]:,} | {result.current_shape[0]:,} |",
             f"| Columns | {result.reference_shape[1]} | {result.current_shape[1]} |",
-            f"| Drifted columns | — | {len(result.drifted_columns)} ({result.drift_fraction:.1%}) |",
+            f"| Drifted columns | — | {len(result.drifted_columns)} "
+            f"({result.drift_fraction:.1%}) |",
             "",
         ]
 
@@ -151,8 +160,13 @@ class MarkdownReportGenerator:
             ks_p = _fmt(c.ks_pvalue) if c.ks_pvalue is not None else "—"
             shift = f"{c.mean_shift_pct:.1f}%" if c.mean_shift_pct is not None else "—"
             chi2_p = _fmt(c.chi2_pvalue) if c.chi2_pvalue is not None else "—"
-            sev_marker = " **HIGH**" if c.drift_severity == "high" else (" moderate" if c.drift_severity == "moderate" else "none")
-            lines.append(f"| {c.name} | {c.col_type} | {psi} | {ks_p} | {shift} | {chi2_p} |{sev_marker} |")
+            if c.drift_severity == "high":
+                sev_marker = " **HIGH**"
+            else:
+                sev_marker = " moderate" if c.drift_severity == "moderate" else "none"
+            lines.append(
+                f"| {c.name} | {c.col_type} | {psi} | {ks_p} | {shift} | {chi2_p} |{sev_marker} |"
+            )
         lines.append("")
 
         if "drift_summary" in chart_paths:
@@ -168,6 +182,97 @@ class MarkdownReportGenerator:
                     lines += [f"### {col}", "", f"![Drift — {col}]({rel})", ""]
 
         report_path = output_dir / "drift_report.md"
+        report_path.write_text("\n".join(lines), encoding="utf-8")
+        return report_path
+
+    def generate_doctor_report(
+        self,
+        df: pd.DataFrame,
+        result: DoctorResult,
+        output_dir: Path,
+        source_name: str,
+    ) -> Path:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rows, cols = df.shape
+        report_path = output_dir / "doctor-report.md"
+
+        lines: list[str] = [
+            f"# Dataset Doctor — {source_name}",
+            "",
+            f"**Generated:** {now}  |  **Rows:** {rows:,}  |  **Columns:** {cols}  |  "
+            f"**emd version:** {__version__}",
+            "",
+            "---",
+            "",
+            "## 1. Dataset Health Score",
+            "",
+            f"**{result.score} / 100 — {result.band}**",
+            "",
+        ]
+
+        category_counts: dict[str, int] = {}
+        for finding in result.findings:
+            category_counts[finding.category] = category_counts.get(finding.category, 0) + 1
+        if category_counts:
+            lines += [
+                "| Category | Findings | Points deducted |",
+                "|:---------|---------:|----------------:|",
+            ]
+            for category in CATEGORY_ORDER:
+                if category in category_counts:
+                    lines.append(
+                        f"| {category} | {category_counts[category]} "
+                        f"| {result.category_penalties.get(category, 0)} |"
+                    )
+            lines.append("")
+        lines += [
+            f"Score starts at 100; each critical finding deducts "
+            f"{PENALTIES[DoctorSeverity.CRITICAL]} points and each warning "
+            f"{PENALTIES[DoctorSeverity.WARNING]}, capped at {CATEGORY_CAP} points per "
+            f"category. Informational findings deduct nothing.",
+            "",
+            "---",
+            "",
+            "## 2. Overall Assessment",
+            "",
+            result.assessment,
+            "",
+            "---",
+            "",
+        ]
+
+        sections = [
+            (3, "Critical Issues", DoctorSeverity.CRITICAL),
+            (4, "Warnings", DoctorSeverity.WARNING),
+            (5, "Information", DoctorSeverity.INFO),
+        ]
+        for number, title, severity in sections:
+            findings = result.by_severity(severity)
+            lines += [f"## {number}. {title} ({len(findings)})", ""]
+            if not findings:
+                lines += ["> None detected.", ""]
+            else:
+                lines += [
+                    "| Check | Category | Affected columns | Finding |",
+                    "|:------|:---------|:-----------------|:--------|",
+                ]
+                for finding in findings:
+                    affected = ", ".join(finding.columns) if finding.columns else "—"
+                    lines.append(
+                        f"| {finding.check} | {finding.category} | {affected} "
+                        f"| {finding.message} |"
+                    )
+                lines.append("")
+            lines += ["---", ""]
+
+        lines += [
+            "## 6. Output",
+            "",
+            f"- **Report:** {report_path.name}",
+            f"- **Source:** {source_name}",
+            "",
+        ]
+
         report_path.write_text("\n".join(lines), encoding="utf-8")
         return report_path
 
@@ -191,7 +296,8 @@ class MarkdownReportGenerator:
             ]
             for issue in qr.issues:
                 lines.append(
-                    f"| {issue.check} | {issue.severity.value} | {issue.result} | {issue.recommendation} |"
+                    f"| {issue.check} | {issue.severity.value} | {issue.result} "
+                    f"| {issue.recommendation} |"
                 )
             lines.append("")
         lines += ["---", ""]
@@ -238,7 +344,10 @@ class MarkdownReportGenerator:
             key = f"{chart_prefix}:{f.feature}"
             if key in chart_paths:
                 rel = _rel_path(chart_paths[key])
-                lines += [f"#### {f.feature}", "", f"![{f.feature} vs {result.target_col}]({rel})", ""]
+                lines += [
+                    f"#### {f.feature}", "",
+                    f"![{f.feature} vs {result.target_col}]({rel})", "",
+                ]
 
         if result.warnings:
             lines += ["### Assumption Notes", ""]
@@ -261,8 +370,10 @@ class MarkdownReportGenerator:
 
         if result.numeric:
             lines += [
-                "| Column | Count | Null% | Mean | Median | Std | Skew | Kurt | Min | Max | Normality p |",
-                "|:-------|------:|------:|-----:|-------:|----:|-----:|-----:|----:|----:|------------:|",
+                "| Column | Count | Null% | Mean | Median | Std | Skew | Kurt "
+                "| Min | Max | Normality p |",
+                "|:-------|------:|------:|-----:|-------:|----:|-----:|-----:"
+                "|----:|----:|------------:|",
             ]
             for s in result.numeric:
                 pval = f"{s.normality_pvalue:.4f}" if s.normality_pvalue is not None else "N/A"
@@ -279,10 +390,14 @@ class MarkdownReportGenerator:
                 if f"dist:{s.name}" in chart_paths:
                     rel = _rel_path(chart_paths[f"dist:{s.name}"])
                     lines += [f"![Distribution of {s.name}]({rel})", ""]
+                cv_str = _fmt(s.cv) if s.cv else "N/A"
+                pval_str = _fmt(s.normality_pvalue) if s.normality_pvalue is not None else "N/A"
                 lines += [
-                    f"- **Mean:** {_fmt(s.mean)}  |  **Std:** {_fmt(s.std)}  |  **CV:** {_fmt(s.cv) if s.cv else 'N/A'}",
-                    f"- **Skewness:** {_fmt(s.skewness)}  |  **Excess Kurtosis:** {_fmt(s.excess_kurtosis)}",
-                    f"- **Normality test ({s.normality_test}):** p = {_fmt(s.normality_pvalue) if s.normality_pvalue is not None else 'N/A'}",
+                    f"- **Mean:** {_fmt(s.mean)}  |  **Std:** {_fmt(s.std)}  |  "
+                    f"**CV:** {cv_str}",
+                    f"- **Skewness:** {_fmt(s.skewness)}  |  "
+                    f"**Excess Kurtosis:** {_fmt(s.excess_kurtosis)}",
+                    f"- **Normality test ({s.normality_test}):** p = {pval_str}",
                     "",
                 ]
                 for note in s.assumptions:
@@ -298,22 +413,22 @@ class MarkdownReportGenerator:
                 "| Column | Count | Null% | Unique | Mode | Mode Freq | Entropy |",
                 "|:-------|------:|------:|-------:|:-----|----------:|--------:|",
             ]
-            for s in result.categorical:
+            for cat in result.categorical:
                 lines.append(
-                    f"| {s.name} | {s.count:,} | {s.null_pct:.1%} | {s.unique_count} "
-                    f"| {s.mode or 'N/A'} | {s.mode_frequency} | {s.entropy:.3f} |"
+                    f"| {cat.name} | {cat.count:,} | {cat.null_pct:.1%} | {cat.unique_count} "
+                    f"| {cat.mode or 'N/A'} | {cat.mode_frequency} | {cat.entropy:.3f} |"
                 )
             lines.append("")
 
-            for s in result.categorical:
-                if f"cat:{s.name}" in chart_paths or s.assumptions:
-                    lines += [f"#### {s.name}", ""]
-                if f"cat:{s.name}" in chart_paths:
-                    rel = _rel_path(chart_paths[f"cat:{s.name}"])
-                    lines += [f"![Top values — {s.name}]({rel})", ""]
-                for note in s.assumptions:
+            for cat in result.categorical:
+                if f"cat:{cat.name}" in chart_paths or cat.assumptions:
+                    lines += [f"#### {cat.name}", ""]
+                if f"cat:{cat.name}" in chart_paths:
+                    rel = _rel_path(chart_paths[f"cat:{cat.name}"])
+                    lines += [f"![Top values — {cat.name}]({rel})", ""]
+                for note in cat.assumptions:
                     lines.append(f"> **Note:** {note}")
-                if s.assumptions:
+                if cat.assumptions:
                     lines.append("")
         else:
             lines += ["> No categorical columns found.", ""]
@@ -333,7 +448,9 @@ class MarkdownReportGenerator:
             key = f"corr_{label}"
             if key in chart_paths:
                 rel = _rel_path(chart_paths[key])
-                lines += [f"### {label.capitalize()} Correlation", "", f"![{label} heatmap]({rel})", ""]
+                lines += [
+                    f"### {label.capitalize()} Correlation", "", f"![{label} heatmap]({rel})", "",
+                ]
 
         if result.strong_pairs:
             lines += [
@@ -419,8 +536,8 @@ class MarkdownReportGenerator:
                 "| Column A | Column B | P(both missing) |",
                 "|:---------|:---------|----------------:|",
             ]
-            for a, b, p in result.correlated_pairs[:10]:
-                lines.append(f"| {a} | {b} | {p:.1%} |")
+            for a, b, p_both in result.correlated_pairs[:10]:
+                lines.append(f"| {a} | {b} | {p_both:.1%} |")
             lines.append("")
 
         lines += ["---", ""]
@@ -521,9 +638,10 @@ class MarkdownReportGenerator:
             "missing": _safe(missing_result),
         }
         if corr_result is not None:
+            pearson, spearman = corr_result.pearson, corr_result.spearman
             payload["correlation"] = {
-                "pearson": corr_result.pearson.to_dict() if corr_result.pearson is not None else None,
-                "spearman": corr_result.spearman.to_dict() if corr_result.spearman is not None else None,
+                "pearson": pearson.to_dict() if pearson is not None else None,
+                "spearman": spearman.to_dict() if spearman is not None else None,
                 "strong_pairs": _safe(corr_result.strong_pairs),
                 "vif": corr_result.vif,
             }

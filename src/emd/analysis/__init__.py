@@ -1,5 +1,6 @@
 from emd.analysis.correlation import CorrelationAnalyzer, CorrelationResult
 from emd.analysis.distribution import DistributionAnalyzer, DistributionResult
+from emd.analysis.doctor import DoctorAnalyzer, DoctorFinding, DoctorResult, DoctorSeverity
 from emd.analysis.drift import DriftAnalyzer, DriftResult
 from emd.analysis.missing import MissingAnalyzer, MissingResult
 from emd.analysis.outlier import OutlierAnalyzer, OutlierResult
@@ -18,4 +19,8 @@ __all__ = [
     "TargetResult",
     "DriftAnalyzer",
     "DriftResult",
+    "DoctorAnalyzer",
+    "DoctorFinding",
+    "DoctorResult",
+    "DoctorSeverity",
 ]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import matplotlib
@@ -24,7 +24,9 @@ DARK_STYLE = "dark_background"
 
 
 class ChartRenderer:
-    def __init__(self, output_dir: Path, fmt: str = "png", dpi: int = 300, theme: str = "light") -> None:
+    def __init__(
+        self, output_dir: Path, fmt: str = "png", dpi: int = 300, theme: str = "light"
+    ) -> None:
         self.charts_dir = output_dir / "charts"
         self.charts_dir.mkdir(parents=True, exist_ok=True)
         self.fmt = fmt
@@ -169,7 +171,7 @@ class ChartRenderer:
                 ax.set_xlabel("Missing (%)")
                 ax.set_title("Missing Values per Column")
                 ax.legend(fontsize=8)
-                for bar, pct in zip(bars[::-1], pcts[::-1]):
+                for bar, pct in zip(bars[::-1], pcts[::-1], strict=True):
                     ax.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
                             f"{pct:.1f}%", va="center", fontsize=8)
                 paths["missing_bar"] = self._save(fig, "missing_bar")
@@ -377,7 +379,9 @@ class ChartRenderer:
                 if key is not None:
                     paths[key] = path
 
-        numeric_drifts = [c for c in result.columns if c.col_type == "numeric" and c.psi is not None]
+        numeric_drifts = [
+            c for c in result.columns if c.col_type == "numeric" and c.psi is not None
+        ]
         if numeric_drifts:
             try:
                 names = [_truncate(c.name, 25) for c in numeric_drifts]

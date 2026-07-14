@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 
@@ -80,7 +79,7 @@ class MissingAnalyzer:
         for key, count in sorted(pattern_counts.items(), key=lambda x: -x[1])[:max_patterns]:
             if any(key):  # skip fully-present rows
                 patterns.append(MissingPattern(
-                    pattern=dict(zip(missing_cols, key)),
+                    pattern=dict(zip(missing_cols, key, strict=True)),
                     row_count=count,
                     row_pct=count / n,
                 ))

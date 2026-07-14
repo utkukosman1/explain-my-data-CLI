@@ -90,6 +90,59 @@ emd summary big_file.csv --sample 10000
 
 ---
 
+## emd doctor
+
+Audits a dataset for practical issues to review before modeling or feature engineering. Answers one question: *"what could be wrong with this dataset?"* — diagnostics, risks, and data quality rather than statistics. It does not duplicate the EDA report: no charts, no distribution tables, no recommendations.
+
+```bash
+emd doctor <file> [OPTIONS]
+```
+
+**What it does — in order:**
+1. Loads the file (aborts only if the dataset has 0 rows or 0 columns — there is no quality gate, since diagnosing broken data is the point)
+2. Runs the shared analyzers (distribution, missing values, correlation, outliers; target analysis if `--target` is given) plus doctor-specific checks
+3. Prints six sections: **Dataset Health Score**, **Overall Assessment**, **Critical Issues**, **Warnings**, **Information**, **Output**
+4. Writes `<output>/<filename>/doctor-report.md` with the same structure, the full (uncapped) finding lists, and a score-breakdown table
+
+The terminal shows all critical issues; warnings and information are capped at 5 each, with the rest in `doctor-report.md`.
+
+**Checks performed** (each finding is one of CRITICAL / WARNING / INFO):
+
+| Category | Checks |
+|:---------|:-------|
+| Structure | Too few rows per column (< 5×), special characters in column names |
+| Completeness | Empty columns (100% missing), severe (≥ 50%) and high (≥ 10%) missingness, correlated missingness |
+| Duplication | Duplicate rows (severity scales with %), duplicate columns (identical content) |
+| Type Integrity | Mixed-type columns, all-text datasets, numeric values stored as text, dates stored as text, disguised missing values (`"NA"`, `"?"`, `"-"`, …), inconsistent category labels (`"Yes"` vs `"yes "`) |
+| Feature Quality | Constant and near-constant (> 99% one value) columns, identifier-like columns, high-cardinality categoricals, extreme outlier concentration (≥ 5% beyond 3×IQR) |
+| Redundancy | Near-duplicate feature pairs (\|r\| ≥ 0.95), severe multicollinearity (VIF > 10) |
+| Target Risks (only with `--target`) | Possible target leakage (association ≥ 0.99), class imbalance (minority class < 10%), missing target values |
+
+**Dataset Health Score** is deterministic — computed only from the findings above, never from generated text. The score starts at 100; each critical finding deducts 15 points and each warning 5 (informational findings deduct nothing), with deductions capped at 25 points per category so one bad dimension can't zero out the score. Bands: 90–100 Excellent, 75–89 Good, 60–74 Fair, 40–59 Poor, 0–39 Critical.
+
+**Options:**
+
+| Option | Default | Description |
+|:-------|:--------|:------------|
+| `--output`, `-o` | `./reports` | Output directory for `doctor-report.md` |
+| `--target` | — | Target column — enables the leakage and class-imbalance checks |
+| `--sheet` | — | Sheet name for XLSX files |
+| `--drop-cols` | — | Comma-separated columns to exclude before diagnosis |
+| `--sample` | — | Diagnose a random sample of N rows |
+| `--quiet`, `-q` | off | Suppress terminal output (the report is still written) |
+
+**Exit codes:** `0` on success regardless of the score; `1` only on a bad or empty file.
+
+**Examples:**
+
+```bash
+emd doctor data.csv
+emd doctor data.csv --target SalePrice
+emd doctor big_file.csv --sample 10000 --quiet
+```
+
+---
+
 ## emd compare
 
 Compares two datasets for statistical distribution shift (data drift). Useful for MLOps pipelines, monitoring production data, or comparing train/test splits.
@@ -389,6 +442,13 @@ Every `emd analyze` run produces:
     outlier_comparison.png
     target_hist_<col>.png    # (only with --target, categorical target)
     target_scatter_<col>.png # (only with --target, numeric target)
+```
+
+Every `emd doctor` run produces:
+
+```
+<output>/<filename>/
+  doctor-report.md       # health score, assessment, and full finding lists
 ```
 
 Every `emd compare` run produces:

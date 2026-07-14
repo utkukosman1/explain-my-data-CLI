@@ -75,7 +75,10 @@ class OutlierAnalyzer:
         q1, q3 = np.percentile(arr, [25, 75])
         iqr = q3 - q1
         iqr_mask = (arr < q1 - self.iqr_multiplier * iqr) | (arr > q3 + self.iqr_multiplier * iqr)
-        iqr_extreme_mask = (arr < q1 - self.iqr_extreme_multiplier * iqr) | (arr > q3 + self.iqr_extreme_multiplier * iqr)
+        iqr_extreme_mask = (
+            (arr < q1 - self.iqr_extreme_multiplier * iqr)
+            | (arr > q3 + self.iqr_extreme_multiplier * iqr)
+        )
 
         # Z-score method
         if arr.std(ddof=1) > 0:
@@ -161,8 +164,8 @@ def _check_outlier_assumptions(
     # Large disagreement between Z-score and Modified Z-score
     if n >= 20 and mzscore_count > 0 and zscore_count > mzscore_count * 3:
         notes.append(
-            f"Z-score ({zscore_count}) and Modified Z-score ({mzscore_count}) disagree substantially. "
-            f"This typically indicates a skewed or heavy-tailed distribution. "
+            f"Z-score ({zscore_count}) and Modified Z-score ({mzscore_count}) disagree "
+            f"substantially. This typically indicates a skewed or heavy-tailed distribution. "
             f"Prefer Modified Z-score for non-symmetric data."
         )
     elif n >= 20 and zscore_count == 0 and mzscore_count > 0:

@@ -50,6 +50,7 @@ When working on this repository:
 - Make focused, incremental changes.
 - Do not refactor unrelated code.
 - Explain important architectural trade-offs before implementing them.
+- When pushing a commit, never add a `Co-Authored-By: Claude` (or similar AI attribution) trailer.
 
 ## Commands
 

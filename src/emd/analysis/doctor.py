@@ -362,7 +362,7 @@ class DoctorAnalyzer:
                         message=issue.result,
                     ))
 
-        for col in df.select_dtypes(include="object").columns:
+        for col in df.select_dtypes(include=["object", "string"]).columns:
             clean = df[col].dropna()
             n = len(clean)
             if n == 0:

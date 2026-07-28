@@ -95,13 +95,14 @@ class DistributionAnalyzer:
         percentiles = np.percentile(arr, [5, 25, 50, 75, 95])
         iqr = float(percentiles[3] - percentiles[1])
 
-        skewness = float(stats.skew(arr)) if n >= 3 else float("nan")
-        excess_kurtosis = float(stats.kurtosis(arr)) if n >= 4 else float("nan")
+        has_variation = std > 0
+        skewness = float(stats.skew(arr)) if n >= 3 and has_variation else float("nan")
+        excess_kurtosis = float(stats.kurtosis(arr)) if n >= 4 and has_variation else float("nan")
 
         # Normality test
         normality_label = "N/A"
         normality_pvalue = None
-        if n >= 8:
+        if n >= 8 and has_variation:
             if n <= 5000:
                 _, pval = stats.shapiro(arr)
                 normality_label = "Shapiro-Wilk"

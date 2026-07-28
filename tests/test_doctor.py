@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -76,7 +77,9 @@ def test_high_missingness_is_warning() -> None:
 
 def test_constant_column_is_critical() -> None:
     df = pd.DataFrame({"a": range(100), "b": [7] * 100})
-    result = diagnose(df)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = diagnose(df)
     assert "Constant column" in checks(result, DoctorSeverity.CRITICAL)
 
 

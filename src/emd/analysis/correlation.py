@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -107,7 +108,7 @@ class CorrelationAnalyzer:
             binary = cat_df[cat_col].map({unique_vals[0]: 0, unique_vals[1]: 1})
             for num_col in num_df.columns:
                 combined = pd.concat([num_df[num_col], binary], axis=1).dropna()
-                if len(combined) < 5:
+                if len(combined) < 5 or combined.iloc[:, 0].nunique() < 2:
                     continue
                 r, p = stats.pointbiserialr(combined.iloc[:, 0], combined.iloc[:, 1])
                 result.append((str(num_col), str(cat_col), float(r), float(p)))
@@ -120,14 +121,17 @@ class CorrelationAnalyzer:
             from statsmodels.stats.outliers_influence import variance_inflation_factor
 
             clean = num_df.dropna()
-            if len(clean) < num_df.shape[1] * 10:
+            clean = clean.loc[:, clean.nunique() > 1]
+            if clean.shape[1] < 2 or len(clean) < clean.shape[1] * 10:
                 return None
             # Intercept column required for correct VIF (avoids uncentered R²)
             design = np.column_stack([np.ones(len(clean)), clean.to_numpy(dtype=float)])
-            return {
-                col: float(variance_inflation_factor(design, i + 1))
-                for i, col in enumerate(clean.columns)
-            }
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                return {
+                    col: float(variance_inflation_factor(design, i + 1))
+                    for i, col in enumerate(clean.columns)
+                }
         except Exception:
             return None
 
@@ -189,7 +193,7 @@ def _check_correlation_assumptions(
         skewed_cols = []
         for col in num_df.columns:
             arr = num_df[col].dropna().to_numpy(dtype=float)
-            if len(arr) >= 3:
+            if len(arr) >= 3 and np.ptp(arr) > 0:
                 sk = float(stats.skew(arr))
                 if abs(sk) > 2.0:
                     skewed_cols.append((col, sk))

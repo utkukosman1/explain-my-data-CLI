@@ -124,7 +124,7 @@ class QualityChecker:
             ))
 
     def _check_mixed_types(self, df: pd.DataFrame, report: QualityReport) -> None:
-        for col in df.select_dtypes(include="object").columns:
+        for col in df.select_dtypes(include=["object", "string"]).columns:
             numeric_share = pd.to_numeric(df[col], errors="coerce").notna().mean()
             if 0.01 < numeric_share < 0.99:
                 report.add(QualityIssue(

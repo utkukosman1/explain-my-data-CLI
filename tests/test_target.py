@@ -72,6 +72,26 @@ def test_scores_in_range(df_numeric_target: pd.DataFrame) -> None:
         assert 0.0 <= f.score <= 1.0
 
 
+def test_constant_inputs_are_excluded_from_target_associations() -> None:
+    df = pd.DataFrame({
+        "constant_feature": [1] * 10,
+        "variable_feature": range(10),
+        "target": range(10),
+    })
+
+    result = TargetAnalyzer().analyze(df, "target")
+
+    assert [f.feature for f in result.all_features] == ["variable_feature"]
+
+
+def test_constant_target_has_no_undefined_associations() -> None:
+    df = pd.DataFrame({"feature": range(10), "target": [1] * 10})
+
+    result = TargetAnalyzer().analyze(df, "target")
+
+    assert result.all_features == []
+
+
 def test_iris_categorical_target(iris_df: pd.DataFrame) -> None:
     result = TargetAnalyzer().analyze(iris_df, "species")
     assert result.target_type == "categorical"

@@ -115,7 +115,7 @@ class OutlierAnalyzer:
         zscore_count = int(zscore_mask.sum())
         mzscore_count = int(mzscore_mask.sum())
 
-        col_skew = float(stats.skew(arr)) if n >= 3 else 0.0
+        col_skew = float(stats.skew(arr)) if n >= 3 and np.ptp(arr) > 0 else 0.0
         assumptions = _check_outlier_assumptions(
             n=n,
             col_skew=col_skew,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 from scipy import stats
 
@@ -59,7 +60,11 @@ class TargetAnalyzer:
             series = df[col]
             if pd.api.types.is_numeric_dtype(series):
                 combined = pd.concat([series, target], axis=1).dropna()
-                if len(combined) < 5:
+                if (
+                    len(combined) < 5
+                    or combined.iloc[:, 0].nunique() < 2
+                    or combined.iloc[:, 1].nunique() < 2
+                ):
                     continue
                 r, _ = stats.pearsonr(combined.iloc[:, 0], combined.iloc[:, 1])
                 features.append(FeatureImportance(
@@ -73,7 +78,7 @@ class TargetAnalyzer:
                 if len(unique_vals) == 2:
                     binary = series.map({unique_vals[0]: 0, unique_vals[1]: 1})
                     combined = pd.concat([target, binary], axis=1).dropna()
-                    if len(combined) < 5:
+                    if len(combined) < 5 or combined.iloc[:, 0].nunique() < 2:
                         continue
                     r, _ = stats.pointbiserialr(combined.iloc[:, 0], combined.iloc[:, 1])
                     features.append(FeatureImportance(
@@ -95,7 +100,7 @@ class TargetAnalyzer:
                 if len(unique_vals) == 2:
                     binary = target.map({unique_vals[0]: 0, unique_vals[1]: 1})
                     combined = pd.concat([series, binary], axis=1).dropna()
-                    if len(combined) < 5:
+                    if len(combined) < 5 or combined.iloc[:, 0].nunique() < 2:
                         continue
                     r, _ = stats.pointbiserialr(combined.iloc[:, 0], combined.iloc[:, 1])
                     features.append(FeatureImportance(
@@ -203,7 +208,7 @@ def _check_target_assumptions(
     else:
         # Numeric target — check if Pearson is appropriate (target skewness)
         arr = target.dropna().to_numpy(dtype=float)
-        if len(arr) >= 3:
+        if len(arr) >= 3 and np.ptp(arr) > 0:
             target_skew = float(stats.skew(arr))
             if abs(target_skew) > 2.0:
                 direction = "right" if target_skew > 0 else "left"

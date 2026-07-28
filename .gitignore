@@ -16,3 +16,4 @@ test_reports/
 *.png
 !datasets/*.png
 CLAUDE.md
+AGENTS.md
